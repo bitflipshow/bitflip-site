@@ -52,7 +52,7 @@ export async function GET(context) {
     </itunes:owner>
     <itunes:explicit>no</itunes:explicit>
     <itunes:category text="Technology" />
-    <itunes:image href="${siteUrl}/images/cover.png" />
+    <itunes:image href="https://bitflip.show/images/cover.png" />
     `.trim(),
     xmlns: {
       itunes: "http://www.itunes.com/dtds/podcast-1.0.dtd",
