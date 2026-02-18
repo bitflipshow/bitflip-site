@@ -1,7 +1,7 @@
 ---
 name: "Stephen"
 role: "Co-host"
-avatar: "/images/hosts/alex.jpg"
+avatar: "/images/hosts/stephen.png"
 order: 3
 social:
   website: "https://www.ndls.ca/"

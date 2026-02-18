@@ -48,6 +48,11 @@ const { name, role, avatar, social } = host.data;
                 <i class="fa-brands fa-mastodon"></i>
               </a>
             )}
+            {social.youtube && (
+              <a href={social.youtube} target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+                <i class="fa-brands fa-youtube"></i>
+              </a>
+            )}
             {social.linkedin && (
               <a href={social.linkedin} target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
                 <i class="fa-brands fa-linkedin"></i>

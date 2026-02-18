@@ -1,7 +1,7 @@
 ---
 name: "Geoff"
 role: "Co-host"
-avatar: "/images/hosts/geoff.jpg"
+avatar: "/images/hosts/geoff.png"
 order: 4
 social:
   github: "https://github.com/fuzzymistborn"

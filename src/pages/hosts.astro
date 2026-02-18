@@ -50,6 +50,11 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
                     <i class="fa-brands fa-mastodon"></i>
                   </a>
                 )}
+                {social.youtube && (
+                  <a href={social.youtube} target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+                    <i class="fa-brands fa-youtube"></i>
+                  </a>
+                )}
                 {social.linkedin && (
                   <a href={social.linkedin} target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
                     <i class="fa-brands fa-linkedin"></i>
@@ -68,7 +73,7 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
   .host-grid {
     display: grid;
     gap: 20px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
   }
   .host-card {
     padding: 24px;
@@ -129,5 +134,10 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
   }
   .host-social a:hover {
     color: var(--safety-500);
+  }
+  @media (max-width: 768px) {
+    .host-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

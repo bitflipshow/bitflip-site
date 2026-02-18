@@ -63,6 +63,7 @@ const hosts = defineCollection({
       mastodon: z.string().optional(),
       website: z.string().optional(),
       linkedin: z.string().optional(),
+      youtube: z.string().optional(),
     }).optional(),
     order: z.number().optional().default(999),
   }),
