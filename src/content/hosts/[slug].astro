@@ -4,13 +4,21 @@ import { getCollection } from "astro:content";
 
 export async function getStaticPaths() {
   const hosts = await getCollection("hosts");
-  return hosts.map((host) => ({
-    params: { slug: host.slug },
-    props: { host },
-  }));
+  const episodes = await getCollection("episodes");
+  
+  return hosts.map((host) => {
+    const episodeCount = episodes.filter((episode) => 
+      (episode.data.hosts || []).includes(host.slug)
+    ).length;
+    
+    return {
+      params: { slug: host.slug },
+      props: { host, episodeCount },
+    };
+  });
 }
 
-const { host } = Astro.props;
+const { host, episodeCount } = Astro.props;
 const { Content } = await host.render();
 const { name, role, avatar, social } = host.data;
 ---
@@ -26,6 +34,9 @@ const { name, role, avatar, social } = host.data;
       <div>
         <h1 class="host-name">{name}</h1>
         {role && <div class="host-role">{role}</div>}
+        <div class="host-episode-count">
+          {episodeCount} {episodeCount === 1 ? 'episode' : 'episodes'} hosted
+        </div>
         {social && (
           <div class="host-social">
             {social.website && (
@@ -104,6 +115,11 @@ const { name, role, avatar, social } = host.data;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.9rem;
+    margin-bottom: 8px;
+  }
+  .host-episode-count {
+    color: var(--steel-400);
+    font-size: 0.95rem;
     margin-bottom: 16px;
   }
   .host-social {

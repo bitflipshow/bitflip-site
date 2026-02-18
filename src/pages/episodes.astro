@@ -6,13 +6,21 @@ const episodes = await getCollection("episodes");
 const sortedEpisodes = episodes.sort((a, b) => 
   new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
 );
+
+// Pagination
+const EPISODES_PER_PAGE = 20;
+const currentPage = Number(Astro.url.searchParams.get("page") || "1");
+const totalPages = Math.ceil(sortedEpisodes.length / EPISODES_PER_PAGE);
+const startIndex = (currentPage - 1) * EPISODES_PER_PAGE;
+const endIndex = startIndex + EPISODES_PER_PAGE;
+const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
 ---
 
 <Base title="Episodes | BitFlip.show">
   <section>
     <div class="section-title">All Episodes</div>
     <div class="episodes-grid">
-      {sortedEpisodes.map((episode) => {
+      {paginatedEpisodes.map((episode) => {
         const { title, episodeNumber, date, duration, tags } = episode.data;
         
         return (
@@ -38,6 +46,34 @@ const sortedEpisodes = episodes.sort((a, b) =>
         );
       })}
     </div>
+    
+    {totalPages > 1 && (
+      <nav class="pagination">
+        {currentPage > 1 && (
+          <a href={`/episodes?page=${currentPage - 1}`} class="pagination-link">
+            ← Previous
+          </a>
+        )}
+        
+        <div class="pagination-numbers">
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+            <a 
+              href={`/episodes?page=${page}`} 
+              class={`pagination-number ${page === currentPage ? 'active' : ''}`}
+              key={page}
+            >
+              {page}
+            </a>
+          ))}
+        </div>
+        
+        {currentPage < totalPages && (
+          <a href={`/episodes?page=${currentPage + 1}`} class="pagination-link">
+            Next →
+          </a>
+        )}
+      </nav>
+    )}
   </section>
 </Base>
 
@@ -137,6 +173,63 @@ const sortedEpisodes = episodes.sort((a, b) =>
     background-color: rgba(243, 139, 18, 0.1);
   }
   
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid rgba(243, 139, 18, 0.2);
+  }
+  
+  .pagination-link {
+    padding: 10px 20px;
+    border: 1px solid rgba(243, 139, 18, 0.4);
+    border-radius: var(--radius-sm);
+    color: var(--safety-500);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  
+  .pagination-link:hover {
+    background: rgba(243, 139, 18, 0.1);
+    border-color: rgba(243, 139, 18, 0.6);
+  }
+  
+  .pagination-numbers {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .pagination-number {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: var(--radius-sm);
+    color: var(--steel-300);
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  
+  .pagination-number:hover {
+    background: rgba(243, 139, 18, 0.1);
+    border-color: rgba(243, 139, 18, 0.5);
+    color: var(--steel-100);
+  }
+  
+  .pagination-number.active {
+    background: var(--safety-500);
+    border-color: var(--safety-500);
+    color: var(--ink-900);
+  }
+  
   @media (max-width: 768px) {
     .episodes-grid {
       grid-template-columns: 1fr;
@@ -149,6 +242,15 @@ const sortedEpisodes = episodes.sort((a, b) =>
     
     .episode-meta {
       align-items: flex-start;
+    }
+    
+    .pagination {
+      flex-wrap: wrap;
+    }
+    
+    .pagination-numbers {
+      flex-wrap: wrap;
+      justify-content: center;
     }
   }
 </style>

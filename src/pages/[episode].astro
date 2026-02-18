@@ -5,13 +5,22 @@ import { getCollection } from "astro:content";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes");
-  return episodes.map((episode) => ({
-    params: { episode: String(episode.data.episodeNumber) },
-    props: { episode },
-  }));
+  const allHosts = await getCollection("hosts");
+  
+  return episodes.map((episode) => {
+    const episodeHostSlugs = episode.data.hosts || [];
+    const episodeHosts = allHosts.filter((host) => 
+      episodeHostSlugs.includes(host.slug)
+    );
+    
+    return {
+      params: { episode: String(episode.data.episodeNumber) },
+      props: { episode, hosts: episodeHosts },
+    };
+  });
 }
 
-const { episode } = Astro.props;
+const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
 ---
@@ -36,6 +45,23 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
         )}
       </div>
     </div>
+    
+    {hosts && hosts.length > 0 && (
+      <div class="episode-hosts">
+        <div class="section-title">Hosts</div>
+        <div class="hosts-grid">
+          {hosts.map((host) => (
+            <a href={`/hosts/${host.slug}`} class="host-chip" key={host.slug}>
+              {host.data.avatar && (
+                <img src={host.data.avatar} alt={host.data.name} class="host-chip-avatar" />
+              )}
+              <span class="host-chip-name">{host.data.name}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
+    
     <AudioPlayer episode={episode} />
     <div class="detail-notes">
       <Content />
@@ -93,6 +119,44 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+  .episode-hosts {
+    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: var(--radius-md);
+    padding: 20px;
+  }
+  .hosts-grid {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .host-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: rgba(243, 139, 18, 0.1);
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 999px;
+    color: var(--steel-100);
+    transition: all 0.2s;
+  }
+  .host-chip:hover {
+    background: rgba(243, 139, 18, 0.2);
+    border-color: rgba(243, 139, 18, 0.5);
+    transform: translateY(-2px);
+  }
+  .host-chip-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(243, 139, 18, 0.3);
+  }
+  .host-chip-name {
+    font-weight: 600;
+    font-size: 0.9rem;
   }
   .detail-notes {
     color: var(--steel-300);

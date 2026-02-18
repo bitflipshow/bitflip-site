@@ -24,12 +24,13 @@ const episodes = defineCollection({
       ),
     audioSize: z.number(),
     duration: z.string(),
-    coverImage: z.string().optional().default("/images/podcast-cover.png"),
+    coverImage: z.string().optional().default("/images/cover.png"),
     explicit: z.boolean(),
     youtubeUrl: z.string().url().optional(),
     transcriptUrl: z.string().url().optional(),
     chapters: chaptersSchema,
     tags: z.array(z.string()).optional(),
+    hosts: z.array(z.string()).optional(),
     guests: z
       .array(
         z.object({

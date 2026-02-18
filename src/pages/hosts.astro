@@ -3,6 +3,17 @@ import Base from "../layouts/Base.astro";
 import { getCollection } from "astro:content";
 
 const hosts = await getCollection("hosts");
+const episodes = await getCollection("episodes");
+
+// Count episodes per host
+const episodeCounts = new Map<string, number>();
+episodes.forEach((episode) => {
+  const episodeHosts = episode.data.hosts || [];
+  episodeHosts.forEach((hostSlug) => {
+    episodeCounts.set(hostSlug, (episodeCounts.get(hostSlug) || 0) + 1);
+  });
+});
+
 const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order || 999));
 ---
 
@@ -13,21 +24,32 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
       {sortedHosts.map(async (host) => {
         const { Content } = await host.render();
         const { name, role, avatar, social } = host.data;
+        const episodeCount = episodeCounts.get(host.slug) || 0;
         
         return (
           <article class="host-card">
             {avatar && (
               <div class="host-avatar">
-                <img src={avatar} alt={name} />
+                <a href={`/hosts/${host.slug}`}>
+                  <img src={avatar} alt={name} />
+                </a>
               </div>
             )}
             <div class="host-header">
-              <div class="host-name">{name}</div>
+              <div class="host-name">
+                <a href={`/hosts/${host.slug}`}>{name}</a>
+              </div>
               {role && <div class="host-role">{role}</div>}
+              <div class="host-episode-count">
+                {episodeCount} {episodeCount === 1 ? 'episode' : 'episodes'}
+              </div>
             </div>
-            <div class="host-bio">
+            <div class="host-bio host-bio-excerpt">
               <Content />
             </div>
+            <a href={`/hosts/${host.slug}`} class="read-more">
+              Read more →
+            </a>
             {social && (
               <div class="host-social">
                 {social.website && (
@@ -90,6 +112,10 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     overflow: hidden;
     border: 2px solid rgba(243, 139, 18, 0.3);
     margin: 0 auto;
+    transition: border-color 0.2s;
+  }
+  .host-avatar:hover {
+    border-color: rgba(243, 139, 18, 0.6);
   }
   .host-avatar img {
     width: 100%;
@@ -103,6 +129,12 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     font-family: var(--font-display);
     font-size: 1.4rem;
   }
+  .host-name a {
+    transition: color 0.2s;
+  }
+  .host-name a:hover {
+    color: var(--safety-500);
+  }
   .host-role {
     color: var(--steel-500);
     text-transform: uppercase;
@@ -110,15 +142,36 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     font-size: 0.75rem;
     margin-top: 4px;
   }
+  .host-episode-count {
+    color: var(--steel-400);
+    font-size: 0.85rem;
+    margin-top: 8px;
+  }
   .host-bio {
     color: var(--steel-300);
     line-height: 1.6;
+  }
+  .host-bio-excerpt {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .host-bio :global(p) {
     margin: 0 0 12px;
   }
   .host-bio :global(p:last-child) {
     margin-bottom: 0;
+  }
+  .read-more {
+    color: var(--safety-500);
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
+    transition: color 0.2s;
+  }
+  .read-more:hover {
+    color: var(--safety-600);
   }
   .host-social {
     display: flex;
