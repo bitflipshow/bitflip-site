@@ -1,31 +1,65 @@
 ---
 import Base from "../layouts/Base.astro";
+import { getCollection } from "astro:content";
 
-const hosts = [
-  {
-    name: "Host One",
-    role: "Co-host",
-    bio: "Infra pragmatist, homelab tinkerer, and relentless bug hunter.",
-  },
-  {
-    name: "Host Two",
-    role: "Co-host",
-    bio: "Ops-minded builder focused on the messy middle of real-world systems.",
-  },
-];
+const hosts = await getCollection("hosts");
+const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order || 999));
 ---
 
 <Base title="Hosts | BitFlip.show">
   <section>
     <div class="section-title">Hosts</div>
     <div class="host-grid">
-      {hosts.map((host) => (
-        <article class="host-card" key={host.name}>
-          <div class="host-name">{host.name}</div>
-          <div class="host-role">{host.role}</div>
-          <p class="host-bio">{host.bio}</p>
-        </article>
-      ))}
+      {sortedHosts.map(async (host) => {
+        const { Content } = await host.render();
+        const { name, role, avatar, social } = host.data;
+        
+        return (
+          <article class="host-card">
+            {avatar && (
+              <div class="host-avatar">
+                <img src={avatar} alt={name} />
+              </div>
+            )}
+            <div class="host-header">
+              <div class="host-name">{name}</div>
+              {role && <div class="host-role">{role}</div>}
+            </div>
+            <div class="host-bio">
+              <Content />
+            </div>
+            {social && (
+              <div class="host-social">
+                {social.website && (
+                  <a href={social.website} target="_blank" rel="noopener noreferrer" aria-label="Website">
+                    <i class="fa-solid fa-globe"></i>
+                  </a>
+                )}
+                {social.github && (
+                  <a href={social.github} target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+                    <i class="fa-brands fa-github"></i>
+                  </a>
+                )}
+                {social.twitter && (
+                  <a href={social.twitter} target="_blank" rel="noopener noreferrer" aria-label="Twitter">
+                    <i class="fa-brands fa-twitter"></i>
+                  </a>
+                )}
+                {social.mastodon && (
+                  <a href={social.mastodon} target="_blank" rel="noopener noreferrer" aria-label="Mastodon">
+                    <i class="fa-brands fa-mastodon"></i>
+                  </a>
+                )}
+                {social.linkedin && (
+                  <a href={social.linkedin} target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+                    <i class="fa-brands fa-linkedin"></i>
+                  </a>
+                )}
+              </div>
+            )}
+          </article>
+        );
+      })}
     </div>
   </section>
 </Base>
@@ -34,13 +68,31 @@ const hosts = [
   .host-grid {
     display: grid;
     gap: 20px;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   }
   .host-card {
     padding: 24px;
     background: rgba(12, 14, 16, 0.6);
     border: 1px solid rgba(243, 139, 18, 0.2);
     border-radius: var(--radius-md);
+    display: grid;
+    gap: 16px;
+  }
+  .host-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid rgba(243, 139, 18, 0.3);
+    margin: 0 auto;
+  }
+  .host-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .host-header {
+    text-align: center;
   }
   .host-name {
     font-family: var(--font-display);
@@ -56,5 +108,26 @@ const hosts = [
   .host-bio {
     color: var(--steel-300);
     line-height: 1.6;
+  }
+  .host-bio :global(p) {
+    margin: 0 0 12px;
+  }
+  .host-bio :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .host-social {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .host-social a {
+    color: var(--steel-400);
+    font-size: 1.4rem;
+    transition: color 0.2s;
+  }
+  .host-social a:hover {
+    color: var(--safety-500);
   }
 </style>

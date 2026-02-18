@@ -24,7 +24,7 @@ const episodes = defineCollection({
       ),
     audioSize: z.number(),
     duration: z.string(),
-    coverImage: z.string(),
+    coverImage: z.string().optional().default("/images/cover.png"),
     explicit: z.boolean(),
     youtubeUrl: z.string().url().optional(),
     transcriptUrl: z.string().url().optional(),
@@ -51,6 +51,24 @@ const episodes = defineCollection({
   }),
 });
 
+const hosts = defineCollection({
+  type: "content",
+  schema: z.object({
+    name: z.string(),
+    role: z.string().optional(),
+    avatar: z.string().optional(),
+    social: z.object({
+      github: z.string().optional(),
+      twitter: z.string().optional(),
+      mastodon: z.string().optional(),
+      website: z.string().optional(),
+      linkedin: z.string().optional(),
+    }).optional(),
+    order: z.number().optional().default(999),
+  }),
+});
+
 export const collections = {
   episodes,
+  hosts,
 };

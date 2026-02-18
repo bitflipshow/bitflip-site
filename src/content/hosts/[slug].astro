@@ -1,0 +1,149 @@
+---
+import Base from "../layouts/Base.astro";
+import { getCollection } from "astro:content";
+
+export async function getStaticPaths() {
+  const hosts = await getCollection("hosts");
+  return hosts.map((host) => ({
+    params: { slug: host.slug },
+    props: { host },
+  }));
+}
+
+const { host } = Astro.props;
+const { Content } = await host.render();
+const { name, role, avatar, social } = host.data;
+---
+
+<Base title={`${name} | BitFlip.show`}>
+  <article class="host-detail">
+    <div class="host-header">
+      {avatar && (
+        <div class="host-avatar">
+          <img src={avatar} alt={name} />
+        </div>
+      )}
+      <div>
+        <h1 class="host-name">{name}</h1>
+        {role && <div class="host-role">{role}</div>}
+        {social && (
+          <div class="host-social">
+            {social.website && (
+              <a href={social.website} target="_blank" rel="noopener noreferrer" aria-label="Website">
+                <i class="fa-solid fa-globe"></i>
+              </a>
+            )}
+            {social.github && (
+              <a href={social.github} target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+                <i class="fa-brands fa-github"></i>
+              </a>
+            )}
+            {social.twitter && (
+              <a href={social.twitter} target="_blank" rel="noopener noreferrer" aria-label="Twitter">
+                <i class="fa-brands fa-twitter"></i>
+              </a>
+            )}
+            {social.mastodon && (
+              <a href={social.mastodon} target="_blank" rel="noopener noreferrer" aria-label="Mastodon">
+                <i class="fa-brands fa-mastodon"></i>
+              </a>
+            )}
+            {social.linkedin && (
+              <a href={social.linkedin} target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+                <i class="fa-brands fa-linkedin"></i>
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+    <div class="host-bio">
+      <Content />
+    </div>
+  </article>
+</Base>
+
+<style>
+  .host-detail {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .host-header {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid rgba(243, 139, 18, 0.2);
+  }
+  .host-avatar {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 3px solid rgba(243, 139, 18, 0.3);
+  }
+  .host-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .host-name {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    margin: 0 0 8px;
+  }
+  .host-role {
+    color: var(--steel-500);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+  }
+  .host-social {
+    display: flex;
+    gap: 16px;
+  }
+  .host-social a {
+    color: var(--steel-400);
+    font-size: 1.5rem;
+    transition: color 0.2s;
+  }
+  .host-social a:hover {
+    color: var(--safety-500);
+  }
+  .host-bio {
+    color: var(--steel-300);
+    line-height: 1.7;
+    font-size: 1.05rem;
+  }
+  .host-bio :global(h2) {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    margin: 32px 0 16px;
+    color: var(--steel-100);
+  }
+  .host-bio :global(p) {
+    margin: 0 0 16px;
+  }
+  .host-bio :global(a) {
+    color: var(--safety-500);
+    text-decoration: underline;
+  }
+  .host-bio :global(a:hover) {
+    color: var(--safety-600);
+  }
+  @media (max-width: 720px) {
+    .host-header {
+      grid-template-columns: 1fr;
+      text-align: center;
+    }
+    .host-avatar {
+      margin: 0 auto;
+    }
+    .host-social {
+      justify-content: center;
+    }
+  }
+</style>
