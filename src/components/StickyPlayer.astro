@@ -1,4 +1,4 @@
-<div class="sticky-player" data-sticky>
+<div class="sticky-player" data-sticky transition:persist>
   <div class="sticky-info">
     <div class="sticky-title" data-title>Nothing playing</div>
     <div class="sticky-meta" data-meta>BitFlip.show</div>
@@ -17,110 +17,144 @@
 </div>
 
 <script type="module">
-  const root = document.querySelector("[data-sticky]");
-  const audio = root.querySelector("#global-audio");
-  const title = root.querySelector("[data-title]");
-  const meta = root.querySelector("[data-meta]");
-  const playBtn = root.querySelector("[data-play]");
-  const backBtn = root.querySelector("[data-back]");
-  const forwardBtn = root.querySelector("[data-forward]");
-  const current = root.querySelector("[data-current]");
-  const duration = root.querySelector("[data-duration]");
-  const range = root.querySelector("[data-range]");
+  function initPlayer() {
+    const root = document.querySelector("[data-sticky]");
+    if (!root) return;
+    
+    const audio = root.querySelector("#global-audio");
+    const title = root.querySelector("[data-title]");
+    const meta = root.querySelector("[data-meta]");
+    const playBtn = root.querySelector("[data-play]");
+    const backBtn = root.querySelector("[data-back]");
+    const forwardBtn = root.querySelector("[data-forward]");
+    const current = root.querySelector("[data-current]");
+    const duration = root.querySelector("[data-duration]");
+    const range = root.querySelector("[data-range]");
 
-  const storageKey = "bitflip-player-state";
+    // Check if already initialized
+    if (audio._initialized) {
+      return;
+    }
+    audio._initialized = true;
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
-    return `${mins}:${secs}`;
-  };
+    const storageKey = "bitflip-player-state";
 
-  const saveState = () => {
-    const state = {
-      src: audio.currentSrc || audio.src || null,
-      title: title.textContent,
-      currentTime: audio.currentTime || 0,
-      duration: audio.duration || 0,
-      playing: !audio.paused,
+    const formatTime = (seconds) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
+      return `${mins}:${secs}`;
     };
-    localStorage.setItem(storageKey, JSON.stringify(state));
-  };
 
-  const loadState = () => {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return;
-    try {
-      const state = JSON.parse(raw);
-      if (state.src) {
-        audio.src = state.src;
-        title.textContent = state.title || "Now playing";
-        meta.textContent = "Resumed";
-        audio.currentTime = state.currentTime || 0;
+    const saveState = () => {
+      const state = {
+        src: audio.currentSrc || audio.src || null,
+        title: title.textContent,
+        currentTime: audio.currentTime || 0,
+        duration: audio.duration || 0,
+        playing: !audio.paused,
+      };
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    };
+
+    const loadState = () => {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      try {
+        const state = JSON.parse(raw);
+        if (state.src) {
+          audio.src = state.src;
+          title.textContent = state.title || "Now playing";
+          meta.textContent = "Resumed";
+          audio.currentTime = state.currentTime || 0;
+        }
+      } catch (err) {
+        console.warn("Failed to restore player state", err);
       }
-    } catch (err) {
-      console.warn("Failed to restore player state", err);
-    }
-  };
+    };
 
-  loadState();
+    // Update UI to match current audio state
+    const syncUI = () => {
+      if (audio.paused) {
+        playBtn.textContent = "Play";
+      } else {
+        playBtn.textContent = "Pause";
+      }
+      
+      current.textContent = formatTime(audio.currentTime || 0);
+      if (audio.duration) {
+        duration.textContent = formatTime(audio.duration);
+        range.value = String(Math.floor((audio.currentTime / audio.duration) * 100));
+      }
+    };
 
-  playBtn.addEventListener("click", async () => {
-    if (!audio.src) return;
-    if (audio.paused) {
+    loadState();
+    syncUI();
+
+    playBtn.addEventListener("click", async () => {
+      if (!audio.src) return;
+      if (audio.paused) {
+        await audio.play();
+      } else {
+        audio.pause();
+      }
+    });
+
+    backBtn.addEventListener("click", () => {
+      audio.currentTime = Math.max(0, audio.currentTime - 15);
+    });
+
+    forwardBtn.addEventListener("click", () => {
+      audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 15);
+    });
+
+    range.addEventListener("input", () => {
+      if (!audio.duration) return;
+      const value = Number(range.value) / 100;
+      audio.currentTime = audio.duration * value;
+    });
+
+    audio.addEventListener("timeupdate", () => {
+      current.textContent = formatTime(audio.currentTime || 0);
+      if (audio.duration) {
+        duration.textContent = formatTime(audio.duration);
+        range.value = String(Math.floor((audio.currentTime / audio.duration) * 100));
+      }
+      saveState();
+    });
+
+    audio.addEventListener("play", () => {
+      playBtn.textContent = "Pause";
+    });
+
+    audio.addEventListener("pause", () => {
+      playBtn.textContent = "Play";
+    });
+
+    window.addEventListener("bitflip:play", async (event) => {
+      const { src, title: epTitle } = event.detail || {};
+      if (!src) return;
+      if (audio.src !== src) {
+        audio.src = src;
+      }
+      title.textContent = epTitle || "Now playing";
+      meta.textContent = "Now playing";
       await audio.play();
-    } else {
-      audio.pause();
-    }
-  });
+      saveState();
+    });
 
-  backBtn.addEventListener("click", () => {
-    audio.currentTime = Math.max(0, audio.currentTime - 15);
-  });
+    window.addEventListener("bitflip:seek", (event) => {
+      const seconds = event.detail?.seconds;
+      if (typeof seconds !== "number") return;
+      audio.currentTime = seconds;
+    });
+  }
 
-  forwardBtn.addEventListener("click", () => {
-    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 15);
-  });
+  // Initialize on first load
+  initPlayer();
 
-  range.addEventListener("input", () => {
-    if (!audio.duration) return;
-    const value = Number(range.value) / 100;
-    audio.currentTime = audio.duration * value;
-  });
-
-  audio.addEventListener("timeupdate", () => {
-    current.textContent = formatTime(audio.currentTime || 0);
-    if (audio.duration) {
-      duration.textContent = formatTime(audio.duration);
-      range.value = String(Math.floor((audio.currentTime / audio.duration) * 100));
-    }
-    saveState();
-  });
-
-  audio.addEventListener("play", () => {
-    playBtn.textContent = "Pause";
-  });
-
-  audio.addEventListener("pause", () => {
-    playBtn.textContent = "Play";
-  });
-
-  window.addEventListener("bitflip:play", async (event) => {
-    const { src, title: epTitle } = event.detail || {};
-    if (!src) return;
-    if (audio.src !== src) {
-      audio.src = src;
-    }
-    title.textContent = epTitle || "Now playing";
-    meta.textContent = "Now playing";
-    await audio.play();
-    saveState();
-  });
-
-  window.addEventListener("bitflip:seek", (event) => {
-    const seconds = event.detail?.seconds;
-    if (typeof seconds !== "number") return;
-    audio.currentTime = seconds;
+  // Reinitialize after page transitions
+  document.addEventListener('astro:after-swap', () => {
+    initPlayer();
   });
 </script>
 
