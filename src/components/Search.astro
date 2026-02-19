@@ -6,30 +6,32 @@
   <div id="search"></div>
 </div>
 
-<script>
-  // Wait for DOM to be ready
-  if (typeof window !== 'undefined') {
-    window.addEventListener('DOMContentLoaded', () => {
-      // @ts-ignore
-      import("/pagefind/pagefind.js")
-        .then((module) => {
-          const pagefind = module;
-          
-          // Initialize Pagefind UI
-          new pagefind.PagefindUI({
-            element: "#search",
-            showImages: false,
-            showSubResults: true,
-            excerptLength: 30,
-          });
-        })
-        .catch((error) => {
-          console.error("Failed to load Pagefind:", error);
-          document.getElementById("search").innerHTML = 
-            '<p style="color: var(--steel-400); padding: 20px; text-align: center;">Search is currently unavailable. Please try again later.</p>';
-        });
-    });
-  }
+<script is:inline>
+  // Load Pagefind UI script dynamically
+  const script = document.createElement('script');
+  script.src = '/pagefind/pagefind-ui.js';
+  script.onload = function() {
+    // PagefindUI is now available globally
+    if (window.PagefindUI) {
+      new window.PagefindUI({
+        element: "#search",
+        showImages: false,
+        showSubResults: true,
+        excerptLength: 30,
+      });
+    } else {
+      console.error("PagefindUI not found on window");
+    }
+  };
+  script.onerror = function() {
+    console.error("Failed to load Pagefind script");
+    const searchEl = document.getElementById("search");
+    if (searchEl) {
+      searchEl.innerHTML = 
+        '<p style="color: var(--steel-400); padding: 20px; text-align: center;">Search is currently unavailable. Please try again later.</p>';
+    }
+  };
+  document.head.appendChild(script);
 </script>
 
 <style>
@@ -37,6 +39,16 @@
     max-width: 800px;
     margin: 0 auto;
     min-height: 200px;
+  }
+
+  /* Override Pagefind's default styles */
+  :global(.pagefind-ui),
+  :global(.pagefind-ui *) {
+    background: transparent !important;
+  }
+
+  :global(.pagefind-ui__form) {
+    background: transparent !important;
   }
 
   :global(.pagefind-ui__search-input) {
@@ -50,10 +62,27 @@
     width: 100% !important;
   }
 
+  :global(.pagefind-ui__search-input::placeholder) {
+    color: var(--steel-500) !important;
+  }
+
   :global(.pagefind-ui__search-input:focus) {
     border-color: var(--safety-500) !important;
     outline: none !important;
     box-shadow: 0 0 0 3px rgba(243, 139, 18, 0.1) !important;
+  }
+
+  :global(.pagefind-ui__search-clear) {
+    color: var(--steel-400) !important;
+    background: transparent !important;
+  }
+
+  :global(.pagefind-ui__results-area) {
+    background: transparent !important;
+  }
+
+  :global(.pagefind-ui__results) {
+    background: transparent !important;
   }
 
   :global(.pagefind-ui__result) {
@@ -66,22 +95,29 @@
 
   :global(.pagefind-ui__result:hover) {
     border-color: rgba(243, 139, 18, 0.5) !important;
+    background: rgba(12, 14, 16, 0.8) !important;
   }
 
   :global(.pagefind-ui__result-link) {
     color: var(--steel-100) !important;
     font-weight: 600 !important;
     font-size: 1.1rem !important;
+    background: transparent !important;
   }
 
   :global(.pagefind-ui__result-link:hover) {
     color: var(--safety-500) !important;
   }
 
+  :global(.pagefind-ui__result-title) {
+    color: var(--steel-100) !important;
+  }
+
   :global(.pagefind-ui__result-excerpt) {
     color: var(--steel-300) !important;
     margin-top: 8px !important;
     line-height: 1.5 !important;
+    background: transparent !important;
   }
 
   :global(.pagefind-ui__result-title mark),
@@ -95,6 +131,7 @@
     color: var(--steel-400) !important;
     text-align: center !important;
     padding: 20px !important;
+    background: transparent !important;
   }
 
   :global(.pagefind-ui__button) {
@@ -104,5 +141,14 @@
     border-radius: var(--radius-sm) !important;
     padding: 8px 16px !important;
     font-weight: 600 !important;
+  }
+
+  :global(.pagefind-ui__button:hover) {
+    background: var(--safety-600) !important;
+  }
+
+  :global(.pagefind-ui__drawer) {
+    background: var(--ink-800) !important;
+    border: 1px solid rgba(243, 139, 18, 0.2) !important;
   }
 </style>

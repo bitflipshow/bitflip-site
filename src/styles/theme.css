@@ -171,6 +171,12 @@ main {
   }
 }
 
+@media (max-width: 900px) {
+  main {
+    padding: 24px 0 200px;
+  }
+}
+
 @media (max-width: 480px) {
   .brand-logo {
     width: 60px;
@@ -188,5 +194,9 @@ main {
   .nav-links {
     gap: 12px;
     font-size: 0.8rem;
+  }
+  
+  main {
+    padding: 24px 0 220px;
   }
 }
