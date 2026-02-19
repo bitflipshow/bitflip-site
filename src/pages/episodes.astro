@@ -38,7 +38,7 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
             {tags && tags.length > 0 && (
               <div class="episode-tags">
                 {tags.map((tag) => (
-                  <span class="tag" key={tag}>{tag}</span>
+                  <a href={`/tags/${tag}`} class="tag" key={tag}>#{tag}</a>
                 ))}
               </div>
             )}
@@ -164,13 +164,14 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
     padding: 4px 10px;
     border-radius: 999px;
     font-size: 0.7rem;
-    text-transform: uppercase;
+    text-transform: lowercase;
     letter-spacing: 0.08em;
-    transition: background-color 0.2s, color 0.2s;
+    transition: all 0.2s;
   }
   
   .tag:hover {
-    background-color: rgba(243, 139, 18, 0.1);
+    background-color: rgba(243, 139, 18, 0.2);
+    border-color: var(--safety-600);
   }
   
   .pagination {

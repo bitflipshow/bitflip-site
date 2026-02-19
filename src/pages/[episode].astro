@@ -36,10 +36,10 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
         <h1 class="detail-title">{title}</h1>
         <div class="detail-date">{date}</div>
         <p class="detail-summary">{summary}</p>
-        {tags && (
+        {tags && tags.length > 0 && (
           <div class="detail-tags">
             {tags.map((tag) => (
-              <span class="tag" key={tag}>{tag}</span>
+              <a href={`/tags/${tag}`} class="tag" key={tag}>#{tag}</a>
             ))}
           </div>
         )}
@@ -117,8 +117,14 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
     padding: 4px 10px;
     border-radius: 999px;
     font-size: 0.75rem;
-    text-transform: uppercase;
+    text-transform: lowercase;
     letter-spacing: 0.08em;
+    transition: all 0.2s;
+  }
+  .tag:hover {
+    background: rgba(243, 139, 18, 0.2);
+    border-color: var(--safety-600);
+    transform: translateY(-1px);
   }
   .episode-hosts {
     background: rgba(12, 14, 16, 0.6);

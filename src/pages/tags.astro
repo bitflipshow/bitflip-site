@@ -1,0 +1,76 @@
+---
+import Base from "../layouts/Base.astro";
+import { getCollection } from "astro:content";
+
+const episodes = await getCollection("episodes");
+
+// Count episodes per tag
+const tagCounts = new Map<string, number>();
+episodes.forEach((episode) => {
+  (episode.data.tags || []).forEach((tag) => {
+    tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+  });
+});
+
+// Sort tags by count (descending), then alphabetically
+const sortedTags = Array.from(tagCounts.entries())
+  .sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1]; // Sort by count
+    return a[0].localeCompare(b[0]); // Then alphabetically
+  });
+---
+
+<Base title="Tags | BitFlip.show">
+  <section>
+    <div class="section-title">Browse by Tag</div>
+    <div class="tags-cloud">
+      {sortedTags.map(([tag, count]) => (
+        <a href={`/tags/${tag}`} class="tag-chip" key={tag}>
+          <span class="tag-name">#{tag}</span>
+          <span class="tag-count">{count}</span>
+        </a>
+      ))}
+    </div>
+  </section>
+</Base>
+
+<style>
+  .tags-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  .tag-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 999px;
+    color: var(--steel-100);
+    transition: all 0.2s;
+  }
+  
+  .tag-chip:hover {
+    background: rgba(243, 139, 18, 0.1);
+    border-color: rgba(243, 139, 18, 0.6);
+    transform: translateY(-2px);
+  }
+  
+  .tag-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-transform: lowercase;
+  }
+  
+  .tag-count {
+    background: rgba(243, 139, 18, 0.2);
+    color: var(--safety-500);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+</style>
