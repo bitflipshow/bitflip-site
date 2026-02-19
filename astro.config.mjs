@@ -9,5 +9,10 @@ export default defineConfig({
       allowedHosts: ['magrathea.ktz.ts.net'],
       host: true,
     },
+    build: {
+      rollupOptions: {
+        external: ['/pagefind/pagefind.js']
+      }
+    }
   },
 });
