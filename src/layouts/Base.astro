@@ -1,6 +1,8 @@
 ---
 import "../styles/theme.css";
 import StickyPlayer from "../components/StickyPlayer.astro";
+import { ClientRouter } from 'astro:transitions';
+
 const {
   title = "BitFlip.show",
   hideNav = false,
@@ -28,6 +30,7 @@ const {
       data-domain="bitflip.show"
       src="https://plausible.ktz.cloud/js/script.js"
     ></script>
+    <ClientRouter />
   </head>
   <body>
     <header class="site-header container">
