@@ -19,7 +19,7 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
 
 <Base title="Hosts | BitFlip.show">
   <section>
-    <div class="section-title">Hosts</div>
+    <h1 class="page-title">Hosts</h1>
     <div class="host-grid">
       {sortedHosts.map(async (host) => {
         const { Content } = await host.render();
