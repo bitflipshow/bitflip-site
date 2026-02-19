@@ -1,0 +1,209 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Subscribe - BitFlip.show">
+  <div class="subscribe-page">
+    <h1>Subscribe to BitFlip</h1>
+    <p class="intro">
+      Stay up to date with the latest episodes of BitFlip. Choose your preferred platform below.
+    </p>
+
+    <div class="subscribe-options">
+      <div class="subscribe-card">
+        <div class="subscribe-icon">
+          <i class="fa-solid fa-rss"></i>
+        </div>
+        <h2>RSS Feed</h2>
+        <p>Subscribe via RSS in your favorite podcast app or feed reader.</p>
+        <a href="/rss.xml" class="subscribe-button">
+          <i class="fa-solid fa-rss"></i> RSS Feed
+        </a>
+      </div>
+
+      <div class="subscribe-card">
+        <div class="subscribe-icon youtube">
+          <i class="fa-brands fa-youtube"></i>
+        </div>
+        <h2>YouTube</h2>
+        <p>Watch episodes and subscribe to our channel on YouTube.</p>
+        <a href="https://www.youtube.com/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="subscribe-button youtube">
+          <i class="fa-brands fa-youtube"></i> Watch on YouTube
+        </a>
+      </div>
+
+      <div class="subscribe-card">
+        <div class="subscribe-icon github">
+          <i class="fa-brands fa-github"></i>
+        </div>
+        <h2>GitHub</h2>
+        <p>Follow our projects and contributions on GitHub.</p>
+        <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="subscribe-button github">
+          <i class="fa-brands fa-github"></i> Follow on GitHub
+        </a>
+      </div>
+
+      <div class="subscribe-card">
+        <div class="subscribe-icon mastodon">
+          <i class="fa-brands fa-mastodon"></i>
+        </div>
+        <h2>Mastodon</h2>
+        <p>Follow us on Mastodon for updates and discussions.</p>
+        <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="subscribe-button mastodon">
+          <i class="fa-brands fa-mastodon"></i> Follow on Mastodon
+        </a>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .subscribe-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 20px;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+    color: var(--safety-500);
+  }
+
+  .intro {
+    font-size: 1.1rem;
+    color: var(--steel-400);
+    margin-bottom: 48px;
+  }
+
+  .subscribe-options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+  }
+
+  .subscribe-card {
+    background: var(--ink-800);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: 8px;
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    transition: all 0.2s ease;
+  }
+
+  .subscribe-card:hover {
+    border-color: rgba(243, 139, 18, 0.5);
+    transform: translateY(-2px);
+  }
+
+  .subscribe-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(243, 139, 18, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 2rem;
+    color: var(--safety-500);
+  }
+
+  .subscribe-icon.youtube {
+    background: rgba(255, 0, 0, 0.1);
+    color: #ff0000;
+  }
+
+  .subscribe-icon.github {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+
+  .subscribe-icon.mastodon {
+    background: rgba(99, 100, 255, 0.1);
+    color: #6364ff;
+  }
+
+  .subscribe-card h2 {
+    font-size: 1.5rem;
+    margin-bottom: 12px;
+    color: var(--steel-100);
+  }
+
+  .subscribe-card p {
+    color: var(--steel-400);
+    margin-bottom: 24px;
+    flex-grow: 1;
+  }
+
+  .subscribe-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: transparent;
+    border: 1px solid var(--safety-500);
+    color: var(--safety-500);
+    text-decoration: none;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .subscribe-button:hover {
+    background: var(--safety-500);
+    color: var(--ink-900);
+  }
+
+  .subscribe-button.youtube {
+    border-color: #ff0000;
+    color: #ff0000;
+  }
+
+  .subscribe-button.youtube:hover {
+    background: #ff0000;
+    color: white;
+  }
+
+  .subscribe-button.github {
+    border-color: #ffffff;
+    color: #ffffff;
+  }
+
+  .subscribe-button.github:hover {
+    background: #ffffff;
+    color: var(--ink-900);
+  }
+
+  .subscribe-button.mastodon {
+    border-color: #6364ff;
+    color: #6364ff;
+  }
+
+  .subscribe-button.mastodon:hover {
+    background: #6364ff;
+    color: white;
+  }
+
+  @media (max-width: 1024px) {
+    .subscribe-options {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 768px) {
+    h1 {
+      font-size: 2rem;
+    }
+
+    .subscribe-options {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

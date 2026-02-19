@@ -1,91 +1,340 @@
 ---
+import { getCollection } from "astro:content";
 import Base from "../layouts/Base.astro";
-import fs from "node:fs";
-import yaml from "yaml";
 
-const raw = fs.readFileSync(new URL("../../config/site.yaml", import.meta.url), "utf8");
-const config = yaml.parse(raw);
-const subscriptions = config.subscriptions ?? [];
-const iconMap = {
-  rss: "fa-solid fa-rss",
-  youtube: "fa-brands fa-youtube",
-};
+const episodes = (await getCollection("episodes")).sort((a, b) => {
+  // Sort by date (descending - newest first)
+  return new Date(b.data.date).getTime() - new Date(a.data.date).getTime();
+});
+const recentEpisodes = episodes.slice(0, 4);
 ---
 
-<Base title="BitFlip.show — Coming Soon" hideNav hidePlayer>
-  <section class="coming card">
-    <div class="coming-head">
-      <div class="section-title">Coming Soon</div>
+<Base>
+  <div class="home-page">
+    <section class="hero-box">
+      <div class="coming-soon">COMING SOON</div>
       <h1>BitFlip.show</h1>
-      <p>
-        We are getting the studio wired, the feed tuned, and the first episode ready to go out the door.<br/>
+      <p class="tagline">
+        We are getting the studio wired, the feed tuned, and the first episode ready to go out the door.
         Join Alex, Adam, Geoff, and Stephen as your hosts in a brand new, independent, podcast production.
       </p>
-    </div>
-    <div class="subscribe">
-      <div class="section-title">Subscribe</div>
-      <div class="subscribe-grid">
-        {subscriptions.map((item) => (
-          <a class="subscribe-card" href={item.href} aria-label={item.label}>
-            <span class="icon">
-              <i class={iconMap[item.key] ?? "fa-solid fa-circle"}></i>
-            </span>
-            <span>{item.label}</span>
+      
+      <div class="links-section">
+        <div class="subscribe-block">
+          <div class="section-label">SUBSCRIBE</div>
+          <div class="link-buttons">
+            <a href="/rss.xml" class="link-button rss">
+              <i class="fa-solid fa-rss"></i>
+              <span>RSS</span>
+            </a>
+            <a href="https://www.youtube.com/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="link-button youtube">
+              <i class="fa-brands fa-youtube"></i>
+              <span>YouTube</span>
+            </a>
+          </div>
+        </div>
+        
+        <div class="follow-block">
+          <div class="section-label">FOLLOW</div>
+          <div class="link-buttons">
+            <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="link-button github">
+              <i class="fa-brands fa-github"></i>
+              <span>GitHub</span>
+            </a>
+            <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="link-button mastodon">
+              <i class="fa-brands fa-mastodon"></i>
+              <span>Mastodon</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="recent-episodes">
+      <h2>Recent Episodes</h2>
+      <div class="episode-grid">
+        {recentEpisodes.map((episode) => (
+          <a href={`/${episode.slug}`} class="episode-card">
+            <div class="episode-number"># {episode.data.number || episode.slug}</div>
+            <h3>{episode.data.title}</h3>
+            <p class="episode-description">{episode.data.description}</p>
+            <div class="episode-meta">
+              <span class="date">
+                {new Date(episode.data.date).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}
+              </span>
+              {episode.data.duration && (
+                <span class="runtime">
+                  {episode.data.duration}
+                </span>
+              )}
+              {episode.data.tags && episode.data.tags.length > 0 && (
+                <div class="tags">
+                  {episode.data.tags.map((tag) => (
+                    <span class="tag">{tag}</span>
+                  ))}
+                </div>
+              )}
+            </div>
           </a>
         ))}
       </div>
-    </div>
-  </section>
+      <div class="view-all">
+        <a href="/episodes" class="view-all-button">
+          View All Episodes <i class="fa-solid fa-arrow-right"></i>
+        </a>
+      </div>
+    </section>
+  </div>
 </Base>
 
 <style>
-  .coming {
-    padding: 48px;
-    display: grid;
-    gap: 28px;
+  .home-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 20px;
   }
-  .coming h1 {
-    font-family: var(--font-display);
-    font-size: clamp(2.8rem, 6vw, 4.2rem);
-    margin: 0 0 10px;
+
+  .hero-box {
+    background: linear-gradient(135deg, rgba(30, 35, 40, 0.8), rgba(20, 25, 30, 0.9));
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 12px;
+    padding: 48px 40px;
+    margin-bottom: 60px;
   }
-  .coming p {
-    color: var(--steel-300);
-    line-height: 1.6;
-  }
-  .subscribe-grid {
-    display: grid;
-    gap: 16px;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-  .subscribe-card {
-    display: grid;
-    gap: 10px;
-    align-items: center;
-    justify-items: start;
-    padding: 16px;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(243, 139, 18, 0.25);
-    background: rgba(12, 14, 16, 0.6);
-    color: var(--steel-100);
-    font-weight: 600;
+
+  .coming-soon {
+    font-size: 0.75rem;
+    color: var(--steel-500);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.15em;
+    margin-bottom: 24px;
   }
-  .subscribe-card:hover {
+
+  .hero-box h1 {
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+    color: var(--steel-100);
+    line-height: 1.2;
+  }
+
+  .tagline {
+    font-size: 1rem;
+    color: var(--steel-400);
+    max-width: 800px;
+    line-height: 1.6;
+    margin-bottom: 32px;
+  }
+
+  .links-section {
+    display: flex;
+    gap: 48px;
+    margin-top: 32px;
+  }
+
+  .subscribe-block,
+  .follow-block {
+    flex: 1;
+  }
+
+  .section-label {
+    font-size: 0.75rem;
+    color: var(--steel-500);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 16px;
+  }
+
+  .link-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .link-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--steel-300);
+    font-weight: 500;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+  }
+
+  .link-button:hover {
     border-color: rgba(243, 139, 18, 0.6);
+    background: rgba(0, 0, 0, 0.5);
   }
-  .icon {
-    width: 28px;
-    height: 28px;
+
+  .link-button i {
+    font-size: 1rem;
+  }
+
+  .link-button.rss:hover {
     color: var(--safety-500);
   }
-  .icon i {
-    font-size: 1.4rem;
+
+  .link-button.youtube:hover {
+    color: #ff0000;
   }
-  @media (max-width: 720px) {
-    .coming {
-      padding: 32px;
+
+  .link-button.github:hover {
+    color: #ffffff;
+  }
+
+  .link-button.mastodon:hover {
+    color: #6364ff;
+  }
+
+  .recent-episodes {
+    margin-top: 60px;
+  }
+
+  .recent-episodes h2 {
+    font-size: 1.5rem;
+    margin-bottom: 24px;
+    color: var(--safety-500);
+  }
+
+  .episode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+
+  .episode-card {
+    background: var(--ink-800);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: 8px;
+    padding: 20px;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.2s ease;
+  }
+
+  .episode-card:hover {
+    border-color: rgba(243, 139, 18, 0.5);
+    transform: translateY(-2px);
+  }
+
+  .episode-number {
+    font-size: 0.75rem;
+    color: var(--safety-500);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+
+  .episode-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+    color: var(--steel-100);
+    line-height: 1.3;
+  }
+
+  .episode-description {
+    color: var(--steel-400);
+    margin-bottom: 12px;
+    flex-grow: 1;
+    line-height: 1.5;
+    font-size: 0.9rem;
+  }
+
+  .episode-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(243, 139, 18, 0.1);
+    font-size: 0.8rem;
+  }
+
+  .date {
+    color: var(--steel-500);
+  }
+
+  .runtime {
+    color: var(--steel-500);
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    background: rgba(243, 139, 18, 0.1);
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--safety-500);
+    text-transform: lowercase;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  .view-all {
+    text-align: center;
+    margin-top: 32px;
+  }
+
+  .view-all-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: transparent;
+    border: 1px solid var(--safety-500);
+    color: var(--safety-500);
+    text-decoration: none;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+  }
+
+  .view-all-button:hover {
+    background: var(--safety-500);
+    color: var(--ink-900);
+  }
+
+  @media (max-width: 768px) {
+    .hero-box {
+      padding: 32px 24px;
+    }
+
+    .hero-box h1 {
+      font-size: 2rem;
+    }
+
+    .tagline {
+      font-size: 0.95rem;
+    }
+
+    .links-section {
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .episode-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>

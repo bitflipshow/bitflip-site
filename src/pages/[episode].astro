@@ -43,6 +43,13 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
             ))}
           </div>
         )}
+        {episode.data.audioUrl && (
+          <div class="download-section">
+            <a href={episode.data.audioUrl} download class="download-link">
+              <i class="fa-solid fa-download"></i> Download MP3
+            </a>
+          </div>
+        )}
       </div>
     </div>
     
@@ -168,6 +175,37 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
     color: var(--steel-300);
     line-height: 1.7;
   }
+  
+  .download-section {
+    margin-top: 16px;
+  }
+
+  .download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid var(--safety-500);
+    color: var(--safety-500);
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+  }
+
+  .download-link:hover {
+    background: var(--safety-500);
+    color: var(--ink-900);
+  }
+
+  .download-link i {
+    font-size: 1rem;
+  }
+  
   @media (max-width: 860px) {
     .detail-hero {
       grid-template-columns: 1fr;
