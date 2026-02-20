@@ -31,7 +31,11 @@
       const searchEl = document.getElementById("search");
       if (searchEl) {
         searchEl.innerHTML =
-          '<p style="color: var(--steel-400); padding: 20px; text-align: center;">Search is currently unavailable. Please try again later.</p>';
+          '<div style="background: rgba(243,139,18,0.06); border: 1px solid rgba(243,139,18,0.2); border-radius: 14px; padding: 32px; text-align: center; color: var(--steel-300);">' +
+          '<div style="font-size: 1.5rem; margin-bottom: 12px;">🔍</div>' +
+          '<p style="margin: 0 0 8px; font-weight: 600; color: var(--steel-100);">Search unavailable</p>' +
+          '<p style="margin: 0; font-size: 0.9rem; color: var(--steel-400);">Run <code style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px;">astro build</code> first to generate the search index.</p>' +
+          '</div>';
       }
     };
     document.head.appendChild(script);

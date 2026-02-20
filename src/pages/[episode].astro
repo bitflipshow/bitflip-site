@@ -23,9 +23,39 @@ export async function getStaticPaths() {
 const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors } = episode.data;
+
+const siteUrl = "https://bitflip.show";
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "PodcastEpisode",
+  "name": title,
+  "description": summary,
+  "episodeNumber": episodeNumber,
+  "datePublished": date,
+  "url": `${siteUrl}/${episodeNumber}`,
+  "associatedMedia": {
+    "@type": "MediaObject",
+    "contentUrl": episode.data.audioUrl,
+    "duration": episode.data.duration,
+    "encodingFormat": "audio/mpeg"
+  },
+  "partOfSeries": {
+    "@type": "PodcastSeries",
+    "name": "BitFlip.show",
+    "url": siteUrl
+  }
+};
 ---
 
-<Base title={`#${episodeNumber} — ${title} | BitFlip.show`}>
+<Base
+  title={`#${episodeNumber} — ${title} | BitFlip.show`}
+  description={summary}
+  ogImage={coverImage}
+>
+  <Fragment slot="head">
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  </Fragment>
+
   <article class="episode-detail">
     <div class="detail-hero">
       <div class="detail-cover">
@@ -155,7 +185,7 @@ const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors 
   .detail-date {
     color: var(--meta-text);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
     font-size: 0.8rem;
   }
   .detail-summary {
@@ -202,7 +232,6 @@ const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors 
     font-size: 0.875rem;
     transition: background 0.2s, color 0.2s;
   }
-
   .download-link:hover {
     background: var(--safety-500);
     color: var(--ink-900);
@@ -223,12 +252,12 @@ const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors 
     min-width: 0;
   }
   .people-group:first-child {
-    flex: 2;
+    flex: 3;
   }
   .people-grid {
     display: flex;
     gap: 10px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
   .person-chip {
     display: flex;
@@ -239,6 +268,7 @@ const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors 
     border: 1px solid rgba(243, 139, 18, 0.25);
     border-radius: 999px;
     color: var(--steel-100);
+    text-decoration: none;
     transition: var(--transition-card);
   }
   .person-chip:hover {
@@ -308,7 +338,7 @@ const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors 
     border: 1px solid rgba(243, 139, 18, 0.4);
     padding: 4px 12px;
     border-radius: 999px;
-    transition: all 0.2s;
+    transition: background 0.2s, border-color 0.2s;
     white-space: nowrap;
   }
   .sponsor-link:hover {

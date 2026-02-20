@@ -1,6 +1,7 @@
 ---
 import { getCollection } from "astro:content";
 import Base from "../layouts/Base.astro";
+import EpisodeCard from "../components/EpisodeCard.astro";
 
 const episodes = (await getCollection("episodes", ({ data }) => !data.draft)).sort((a, b) => {
   // Sort by date (descending - newest first)
@@ -53,32 +54,7 @@ const recentEpisodes = episodes.slice(0, 4);
       <h2>Recent Episodes</h2>
       <div class="episode-grid">
         {recentEpisodes.map((episode) => (
-          <a href={`/${episode.data.episodeNumber}`} class="episode-card">
-            <div class="episode-number"># {episode.data.episodeNumber}</div>
-            <h3>{episode.data.title}</h3>
-            <p class="episode-description">{episode.data.description}</p>
-            <div class="episode-meta">
-              <span class="date">
-                {new Date(episode.data.date).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
-              {episode.data.duration && (
-                <span class="runtime">
-                  {episode.data.duration}
-                </span>
-              )}
-              {episode.data.tags && episode.data.tags.length > 0 && (
-                <div class="tags">
-                  {episode.data.tags.map((tag) => (
-                    <span class="tag">{tag}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </a>
+          <EpisodeCard episode={episode} />
         ))}
       </div>
       <div class="view-all">
@@ -200,83 +176,6 @@ const recentEpisodes = episodes.slice(0, 4);
     grid-template-columns: repeat(2, 1fr);
     gap: 24px;
     margin-bottom: 40px;
-  }
-
-  .episode-card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius-md);
-    padding: 20px;
-    text-decoration: none;
-    display: flex;
-    flex-direction: column;
-    transition: var(--transition-card);
-  }
-
-  .episode-card:hover {
-    border-color: var(--card-border-hover);
-    transform: translateY(-2px);
-  }
-
-  .episode-number {
-    font-size: 0.75rem;
-    color: var(--safety-500);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 8px;
-  }
-
-  .episode-card h3 {
-    font-size: 1.1rem;
-    margin-bottom: 8px;
-    color: var(--steel-100);
-    line-height: 1.3;
-  }
-
-  .episode-description {
-    color: var(--body-text);
-    margin-bottom: 12px;
-    flex-grow: 1;
-    line-height: 1.5;
-    font-size: 0.9rem;
-  }
-
-  .episode-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding-top: 12px;
-    border-top: 1px solid rgba(243, 139, 18, 0.1);
-    font-size: 0.8rem;
-  }
-
-  .date {
-    color: var(--meta-text);
-  }
-
-  .runtime {
-    color: var(--meta-text);
-  }
-
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: 100%;
-  }
-
-  .tag {
-    display: inline-block;
-    padding: 4px 10px;
-    background: rgba(243, 139, 18, 0.1);
-    border: 1px solid rgba(243, 139, 18, 0.3);
-    border-radius: 999px;
-    font-size: 0.75rem;
-    color: var(--safety-500);
-    text-transform: lowercase;
-    font-weight: 600;
-    letter-spacing: 0.05em;
   }
 
   .view-all {

@@ -1,12 +1,12 @@
-<div class="sticky-player" data-sticky transition:persist>
+<div class="sticky-player" data-sticky transition:persist role="region" aria-label="Audio player">
   <div class="sticky-info">
     <div class="sticky-title" data-title>Nothing playing</div>
     <div class="sticky-meta" data-meta>BitFlip.show</div>
   </div>
-  <div class="sticky-controls">
-    <button class="sticky-button" type="button" data-back>« 15s</button>
-    <button class="sticky-button" type="button" data-play>Play</button>
-    <button class="sticky-button" type="button" data-forward>15s »</button>
+  <div class="sticky-controls" role="group" aria-label="Playback controls">
+    <button class="sticky-button" type="button" data-back aria-label="Skip back 15 seconds">« 15s</button>
+    <button class="sticky-button" type="button" data-play aria-label="Play">Play</button>
+    <button class="sticky-button" type="button" data-forward aria-label="Skip forward 15 seconds">15s »</button>
   </div>
   <div class="sticky-progress">
     <span data-current>0:00</span>
@@ -124,10 +124,12 @@
 
     audio.addEventListener("play", () => {
       playBtn.textContent = "Pause";
+      playBtn.setAttribute("aria-label", "Pause");
     });
 
     audio.addEventListener("pause", () => {
       playBtn.textContent = "Play";
+      playBtn.setAttribute("aria-label", "Play");
     });
 
     window.addEventListener("bitflip:play", async (event) => {

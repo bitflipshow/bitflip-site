@@ -1,33 +1,42 @@
 ---
 const { episode } = Astro.props;
-const { title, episodeNumber, date, summary, tags } = episode.data;
+const { title, episodeNumber, date, summary, duration, tags } = episode.data;
+
+const formattedDate = new Date(date).toLocaleDateString("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+});
 ---
 
-<article class="episode-card">
-  <div class="episode-meta">
-    <div class="episode-number">#{episodeNumber}</div>
-    <div class="episode-date">{date}</div>
-  </div>
-  <h3 class="episode-title">
-    <a href={`/${episodeNumber}`}>{title}</a>
-  </h3>
+<a href={`/${episodeNumber}`} class="episode-card">
+  <div class="episode-number">#{episodeNumber}</div>
+  <h3 class="episode-title">{title}</h3>
   <p class="episode-summary">{summary}</p>
-  {tags && (
-    <div class="episode-tags">
-      {tags.map((tag) => (
-        <span class="tag" key={tag}>{tag}</span>
-      ))}
+  <div class="episode-meta">
+    <div class="date-runtime">
+      <span class="date">{formattedDate}</span>
+      {duration && <span class="runtime">{duration}</span>}
     </div>
-  )}
-</article>
+    {tags && tags.length > 0 && (
+      <div class="episode-tags">
+        {tags.map((tag) => (
+          <span class="tag" key={tag}>{tag}</span>
+        ))}
+      </div>
+    )}
+  </div>
+</a>
 
 <style>
   .episode-card {
-    padding: 20px 24px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--card-border);
     background: var(--card-bg);
-    display: grid;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     transition: var(--transition-card);
   }
@@ -35,35 +44,51 @@ const { title, episodeNumber, date, summary, tags } = episode.data;
     border-color: var(--card-border-hover);
     transform: var(--card-hover-transform);
   }
-  .episode-meta {
-    display: flex;
-    justify-content: space-between;
-    color: var(--steel-500);
+  .episode-number {
+    font-size: 0.75rem;
+    color: var(--safety-500);
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.75rem;
   }
   .episode-title {
     font-family: var(--font-display);
-    font-size: 1.4rem;
+    font-size: 1.2rem;
     margin: 0;
-  }
-  .episode-title a:hover {
-    color: var(--safety-500);
+    color: var(--steel-100);
+    line-height: 1.3;
   }
   .episode-summary {
     color: var(--body-text);
     line-height: 1.5;
+    font-size: 0.95rem;
+    flex-grow: 1;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    margin: 0;
+  }
+  .episode-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(243, 139, 18, 0.1);
+    margin-top: auto;
+  }
+  .date-runtime {
+    display: flex;
+    gap: 16px;
+    font-size: 0.8rem;
+  }
+  .date, .runtime {
+    color: var(--meta-text);
   }
   .episode-tags {
     display: flex;
-    gap: 8px;
     flex-wrap: wrap;
-    margin-top: 4px;
+    gap: 6px;
   }
   .tag {
     border: 1px solid rgba(243, 139, 18, 0.4);

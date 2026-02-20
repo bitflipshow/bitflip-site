@@ -10,20 +10,26 @@ import Base from "../layouts/Base.astro";
         Want to reach the hosts? Drop a note. This form will be wired to a
         worker-backed inbox once we finalize a provider.
       </p>
-      <form class="contact-form">
-        <label>
-          Name
-          <input type="text" name="name" placeholder="Your name" />
-        </label>
-        <label>
-          Email
-          <input type="email" name="email" placeholder="you@example.com" />
-        </label>
-        <label>
-          Message
-          <textarea name="message" rows="5" placeholder="How can we help?"></textarea>
-        </label>
-        <button class="button" type="submit">Send message</button>
+      <p class="form-notice">
+        <i class="fa-solid fa-circle-info"></i>
+        This form isn't wired up yet — in the meantime, reach us on
+        <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer">Discord</a>
+        or <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer">Mastodon</a>.
+      </p>
+      <form class="contact-form" novalidate>
+        <div class="field">
+          <label for="contact-name">Name</label>
+          <input id="contact-name" type="text" name="name" placeholder="Your name" autocomplete="name" required />
+        </div>
+        <div class="field">
+          <label for="contact-email">Email</label>
+          <input id="contact-email" type="email" name="email" placeholder="you@example.com" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="contact-message">Message</label>
+          <textarea id="contact-message" name="message" rows="5" placeholder="How can we help?" required></textarea>
+        </div>
+        <button class="button outline" type="submit">Send message</button>
       </form>
     </div>
   </section>
@@ -42,11 +48,29 @@ import Base from "../layouts/Base.astro";
     gap: 16px;
     margin-top: 16px;
   }
-  label {
-    display: grid;
-    gap: 8px;
+  .form-notice {
+    background: rgba(243, 139, 18, 0.06);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
     font-size: 0.9rem;
     color: var(--body-text);
+    margin-bottom: 8px;
+  }
+  .form-notice a {
+    color: var(--safety-500);
+    text-decoration: underline;
+  }
+  .field {
+    display: grid;
+    gap: 6px;
+  }
+  label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--meta-text);
   }
   input,
   textarea {
@@ -56,5 +80,13 @@ import Base from "../layouts/Base.astro";
     padding: 10px 12px;
     color: var(--steel-100);
     font-family: var(--font-body);
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+  }
+  input:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--safety-500);
+    box-shadow: 0 0 0 3px rgba(243, 139, 18, 0.1);
   }
 </style>

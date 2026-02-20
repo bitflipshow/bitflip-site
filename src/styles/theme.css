@@ -188,26 +188,69 @@ main {
   line-height: 1.2;
 }
 
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  color: var(--steel-300);
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.nav-toggle:hover {
+  border-color: var(--card-border-hover);
+  color: var(--steel-100);
+}
+
 @media (max-width: 768px) {
   .site-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
   }
-  
+
   .brand {
-    width: 100%;
+    flex: 1;
   }
-  
+
   .brand-logo {
     width: 80px;
     height: 80px;
   }
-  
+
+  .nav-toggle {
+    display: block;
+  }
+
   .nav-links {
+    display: none;
     width: 100%;
-    justify-content: space-between;
-    font-size: 0.85rem;
+    flex-direction: column;
+    gap: 0;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .nav-links.is-open {
+    display: flex;
+  }
+
+  .nav-links a {
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.9rem;
+  }
+
+  .nav-links a:last-child {
+    border-bottom: none;
+  }
+
+  .nav-links a:hover {
+    background: rgba(243, 139, 18, 0.06);
   }
 }
 

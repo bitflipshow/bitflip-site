@@ -5,9 +5,14 @@ import { ClientRouter } from 'astro:transitions';
 
 const {
   title = "BitFlip.show",
+  description = "The pragmatic side of infrastructure. A podcast hosted by Alex, Adam, Geoff, and Stephen.",
+  ogImage = "/images/podcast-cover.png",
   hideNav = false,
   hidePlayer = false,
 } = Astro.props;
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site ?? "https://bitflip.show");
+const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
 ---
 <!doctype html>
 <html lang="en">
@@ -19,6 +24,21 @@ const {
     <link rel="icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalURL} />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImageURL} />
+
+    <!-- Twitter/X card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
@@ -30,7 +50,13 @@ const {
       data-domain="bitflip.show"
       src="https://plausible.ktz.cloud/js/script.js"
     ></script>
+    <slot name="head" />
     <ClientRouter />
+    <style>
+      .nav-links a[aria-current="page"] {
+        color: var(--safety-500);
+      }
+    </style>
   </head>
   <body>
     <header class="site-header container">
@@ -44,20 +70,36 @@ const {
         </div>
       </div>
       {!hideNav && (
-        <nav class="nav-links">
-          <a href="/about">About</a>
-          <a href="/episodes">Episodes</a>
-          <a href="/hosts">Hosts</a>
-          <a href="/subscribe">Subscribe</a>
-          <a href="/search">Search</a>
-          <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer">Discord</a>
-          <a href="/contact">Contact</a>
-        </nav>
+        <>
+          <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="main-nav">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <nav id="main-nav" class="nav-links" aria-label="Main navigation">
+            <a href="/about" aria-current={Astro.url.pathname === '/about' ? 'page' : undefined}>About</a>
+            <a href="/episodes" aria-current={Astro.url.pathname === '/episodes' ? 'page' : undefined}>Episodes</a>
+            <a href="/hosts" aria-current={Astro.url.pathname === '/hosts' ? 'page' : undefined}>Hosts</a>
+            <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
+            <a href="/search" aria-current={Astro.url.pathname === '/search' ? 'page' : undefined}>Search</a>
+            <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer">Discord</a>
+            <a href="/contact" aria-current={Astro.url.pathname === '/contact' ? 'page' : undefined}>Contact</a>
+          </nav>
+        </>
       )}
     </header>
     <main class="container" data-pagefind-body>
       <slot />
     </main>
     {!hidePlayer && <StickyPlayer />}
+    <script is:inline>
+      document.addEventListener('astro:page-load', () => {
+        const toggle = document.querySelector('.nav-toggle');
+        const nav = document.getElementById('main-nav');
+        if (!toggle || !nav) return;
+        toggle.addEventListener('click', () => {
+          const isOpen = nav.classList.toggle('is-open');
+          toggle.setAttribute('aria-expanded', String(isOpen));
+        });
+      });
+    </script>
   </body>
 </html>
