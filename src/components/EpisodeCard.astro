@@ -25,10 +25,15 @@ const { title, episodeNumber, date, summary, tags } = episode.data;
   .episode-card {
     padding: 20px 24px;
     border-radius: var(--radius-md);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--card-border);
     background: var(--card-bg);
     display: grid;
     gap: 8px;
+    transition: var(--transition-card);
+  }
+  .episode-card:hover {
+    border-color: var(--card-border-hover);
+    transform: var(--card-hover-transform);
   }
   .episode-meta {
     display: flex;
@@ -47,7 +52,7 @@ const { title, episodeNumber, date, summary, tags } = episode.data;
     color: var(--safety-500);
   }
   .episode-summary {
-    color: var(--steel-300);
+    color: var(--body-text);
     line-height: 1.5;
     display: -webkit-box;
     -webkit-line-clamp: 3;
@@ -63,10 +68,10 @@ const { title, episodeNumber, date, summary, tags } = episode.data;
   .tag {
     border: 1px solid rgba(243, 139, 18, 0.4);
     color: var(--safety-500);
-    padding: 3px 10px;
+    padding: 4px 10px;
     border-radius: 999px;
-    font-size: 0.7rem;
-    text-transform: uppercase;
+    font-size: 0.75rem;
+    text-transform: lowercase;
     letter-spacing: 0.08em;
   }
 </style>

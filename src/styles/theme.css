@@ -17,6 +17,13 @@
   --radius-sm: 8px;
   --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.4);
   --card-bg: rgba(12, 14, 16, 0.7);
+  --card-border: rgba(243, 139, 18, 0.2);
+  --card-border-hover: rgba(243, 139, 18, 0.5);
+  --card-hover-transform: translateY(-2px);
+  --transition-card: border-color 0.2s, transform 0.2s;
+  --transition-color: color 0.2s;
+  --body-text: var(--steel-300);
+  --meta-text: var(--steel-500);
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, sans-serif;
 }
@@ -119,32 +126,55 @@ main {
   box-shadow: var(--shadow-card);
 }
 
+.card-hover {
+  transition: border-color 0.2s, transform 0.2s;
+}
+.card-hover:hover {
+  border-color: var(--card-border-hover);
+  transform: var(--card-hover-transform);
+}
+
 .button {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 20px;
+  gap: 8px;
+  padding: 11px 22px;
   border-radius: 999px;
   background: var(--safety-500);
   color: var(--ink-900);
   font-weight: 600;
+  font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   box-shadow: var(--glow);
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s;
+  border: 1px solid transparent;
+  cursor: pointer;
 }
 
-.button.secondary {
+.button:hover {
+  background: var(--safety-600);
+  color: var(--ink-900);
+}
+
+.button.outline {
   background: transparent;
-  border: 1px solid var(--safety-500);
+  border-color: var(--safety-500);
   color: var(--safety-500);
   box-shadow: none;
+}
+
+.button.outline:hover {
+  background: var(--safety-500);
+  color: var(--ink-900);
 }
 
 .section-title {
   font-family: var(--font-display);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.9rem;
+  letter-spacing: 0.1em;
+  font-size: 0.85rem;
   color: var(--steel-500);
   margin-bottom: 16px;
 }

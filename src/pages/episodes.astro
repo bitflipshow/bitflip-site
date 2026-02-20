@@ -89,18 +89,18 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
 
   .episode-card {
     background: var(--card-bg);
-    border: 1px solid rgba(243, 139, 18, 0.2);
-    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
     padding: 24px;
     text-decoration: none;
     display: flex;
     flex-direction: column;
-    transition: all 0.2s ease;
+    transition: var(--transition-card);
     cursor: pointer;
   }
 
   .episode-card:hover {
-    border-color: rgba(243, 139, 18, 0.5);
+    border-color: var(--card-border-hover);
     transform: translateY(-2px);
   }
 
@@ -121,7 +121,7 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
   }
 
   .description {
-    color: var(--steel-400);
+    color: var(--body-text);
     margin-bottom: 16px;
     flex-grow: 1;
     line-height: 1.6;
@@ -142,11 +142,11 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
   }
 
   .date {
-    color: var(--steel-500);
+    color: var(--meta-text);
   }
 
   .runtime {
-    color: var(--steel-500);
+    color: var(--meta-text);
   }
 
   .tags {
@@ -157,10 +157,10 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
 
   .tag {
     display: inline-block;
-    padding: 4px 12px;
+    padding: 4px 10px;
     background: rgba(243, 139, 18, 0.1);
     border: 1px solid rgba(243, 139, 18, 0.3);
-    border-radius: 4px;
+    border-radius: 999px;
     font-size: 0.75rem;
     color: var(--safety-500);
     text-transform: lowercase;
@@ -177,17 +177,17 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
   }
 
   .page-link {
-    padding: 10px 20px;
+    padding: 11px 22px;
     background: transparent;
     border: 1px solid var(--safety-500);
     color: var(--safety-500);
     text-decoration: none;
-    border-radius: 4px;
+    border-radius: 999px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     font-size: 0.875rem;
-    transition: all 0.2s ease;
+    transition: background 0.2s, color 0.2s;
   }
 
   .page-link:hover {
@@ -196,7 +196,7 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
   }
 
   .page-info {
-    color: var(--steel-400);
+    color: var(--meta-text);
     font-size: 0.875rem;
   }
 

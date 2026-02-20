@@ -46,8 +46,8 @@ const sortedTags = Array.from(tagCounts.entries())
     align-items: center;
     gap: 8px;
     padding: 10px 16px;
-    background: rgba(12, 14, 16, 0.6);
-    border: 1px solid rgba(243, 139, 18, 0.3);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
     border-radius: 999px;
     color: var(--steel-100);
     transition: all 0.2s;
@@ -55,8 +55,8 @@ const sortedTags = Array.from(tagCounts.entries())
   
   .tag-chip:hover {
     background: rgba(243, 139, 18, 0.1);
-    border-color: rgba(243, 139, 18, 0.6);
-    transform: translateY(-2px);
+    border-color: var(--card-border-hover);
+    transform: var(--card-hover-transform);
   }
   
   .tag-name {

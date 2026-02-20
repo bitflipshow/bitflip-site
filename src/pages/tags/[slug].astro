@@ -84,7 +84,7 @@ const { tag, episodes } = Astro.props;
   }
   
   .tag-count {
-    color: var(--steel-400);
+    color: var(--meta-text);
     font-size: 1rem;
     margin: 8px 0 0;
   }
@@ -98,11 +98,11 @@ const { tag, episodes } = Astro.props;
   .episode-card {
     padding: 24px;
     border-radius: var(--radius-md);
-    border: 1px solid rgba(243, 139, 18, 0.2);
-    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
     display: grid;
     gap: 12px;
-    transition: border-color 0.2s, transform 0.2s;
+    transition: var(--transition-card);
   }
   
   .episode-card:hover {
@@ -138,11 +138,11 @@ const { tag, episodes } = Astro.props;
   }
   
   .episode-date {
-    color: var(--steel-500);
+    color: var(--meta-text);
   }
   
   .episode-duration {
-    color: var(--steel-400);
+    color: var(--meta-text);
   }
   
   .episode-title {
@@ -163,7 +163,7 @@ const { tag, episodes } = Astro.props;
   }
   
   .episode-summary {
-    color: var(--steel-300);
+    color: var(--body-text);
     line-height: 1.5;
     margin: 0;
     display: -webkit-box;

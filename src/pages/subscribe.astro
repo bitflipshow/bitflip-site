@@ -43,7 +43,7 @@ import Base from "../layouts/Base.astro";
 
   .intro {
     font-size: 1.1rem;
-    color: var(--steel-400);
+    color: var(--body-text);
     margin-bottom: 48px;
   }
 
@@ -55,18 +55,18 @@ import Base from "../layouts/Base.astro";
 
   .subscribe-card {
     background: var(--card-bg);
-    border: 1px solid rgba(243, 139, 18, 0.2);
-    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
     padding: 32px 24px;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    transition: all 0.2s ease;
+    transition: var(--transition-card);
   }
 
   .subscribe-card:hover {
-    border-color: rgba(243, 139, 18, 0.5);
+    border-color: var(--card-border-hover);
     transform: translateY(-2px);
   }
 
@@ -105,7 +105,7 @@ import Base from "../layouts/Base.astro";
   }
 
   .subscribe-card p {
-    color: var(--steel-400);
+    color: var(--body-text);
     margin-bottom: 24px;
     flex-grow: 1;
   }
@@ -114,7 +114,7 @@ import Base from "../layouts/Base.astro";
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 24px;
+    padding: 11px 22px;
     background: transparent;
     border: 1px solid var(--safety-500);
     color: var(--safety-500);
@@ -122,9 +122,9 @@ import Base from "../layouts/Base.astro";
     border-radius: 999px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 0.9rem;
-    transition: all 0.2s ease;
+    letter-spacing: 0.08em;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.2s;
   }
 
   .subscribe-button:hover {

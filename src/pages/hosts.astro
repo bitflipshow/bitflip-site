@@ -100,10 +100,14 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
   .host-card {
     padding: 24px;
     background: var(--card-bg);
-    border: 1px solid rgba(243, 139, 18, 0.2);
+    border: 1px solid var(--card-border);
     border-radius: var(--radius-md);
     display: grid;
     gap: 16px;
+    transition: var(--transition-card);
+  }
+  .host-card:hover {
+    border-color: var(--card-border-hover);
   }
   .host-avatar {
     width: 120px;
@@ -136,19 +140,19 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     color: var(--safety-500);
   }
   .host-role {
-    color: var(--steel-500);
+    color: var(--meta-text);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.75rem;
     margin-top: 4px;
   }
   .host-episode-count {
-    color: var(--steel-400);
+    color: var(--meta-text);
     font-size: 0.85rem;
     margin-top: 8px;
   }
   .host-bio {
-    color: var(--steel-300);
+    color: var(--body-text);
     line-height: 1.6;
   }
   .host-bio-excerpt {
@@ -181,9 +185,9 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
   .host-social a {
-    color: var(--steel-400);
-    font-size: 1.4rem;
-    transition: color 0.2s;
+    color: var(--meta-text);
+    font-size: 1.5rem;
+    transition: var(--transition-color);
   }
   .host-social a:hover {
     color: var(--safety-500);

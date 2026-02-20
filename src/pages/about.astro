@@ -78,7 +78,7 @@ import Base from "../layouts/Base.astro";
 
   .about-card {
     background: var(--card-bg);
-    border: 1px solid rgba(243, 139, 18, 0.2);
+    border: 1px solid var(--card-border);
     border-radius: var(--radius-md);
     padding: 28px;
     display: flex;
@@ -91,7 +91,7 @@ import Base from "../layouts/Base.astro";
   }
 
   .about-card p {
-    color: var(--steel-300);
+    color: var(--body-text);
     line-height: 1.7;
     margin: 0;
   }
@@ -111,7 +111,7 @@ import Base from "../layouts/Base.astro";
     border-radius: var(--radius-sm);
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.03);
-    transition: all 0.2s;
+    transition: border-color 0.2s, background 0.2s;
   }
 
   .social-link i {
@@ -134,7 +134,7 @@ import Base from "../layouts/Base.astro";
 
   .social-desc {
     font-size: 0.8rem;
-    color: var(--steel-500);
+    color: var(--meta-text);
   }
 
   .social-link.discord i { color: #5865f2; }
