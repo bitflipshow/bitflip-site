@@ -16,6 +16,7 @@
   --radius-md: 14px;
   --radius-sm: 8px;
   --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.4);
+  --card-bg: rgba(12, 14, 16, 0.7);
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, sans-serif;
 }
@@ -112,7 +113,7 @@ main {
 }
 
 .card {
-  background: var(--ink-700);
+  background: var(--card-bg);
   border: 1px solid rgba(243, 139, 18, 0.15);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
