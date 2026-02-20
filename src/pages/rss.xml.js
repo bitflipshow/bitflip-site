@@ -2,7 +2,7 @@ import rss from "@astrojs/rss";
 import { getCollection } from "astro:content";
 
 export async function GET(context) {
-  const episodes = await getCollection("episodes");
+  const episodes = await getCollection("episodes", ({ data }) => !data.draft);
   
   // Sort episodes by date, newest first
   const sortedEpisodes = episodes.sort((a, b) => 
