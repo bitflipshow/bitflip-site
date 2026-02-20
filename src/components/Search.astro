@@ -7,11 +7,7 @@
 </div>
 
 <script is:inline>
-  // Load Pagefind UI script dynamically
-  const script = document.createElement('script');
-  script.src = '/pagefind/pagefind-ui.js';
-  script.onload = function() {
-    // PagefindUI is now available globally
+  function initPagefind() {
     if (window.PagefindUI) {
       new window.PagefindUI({
         element: "#search",
@@ -19,19 +15,29 @@
         showSubResults: true,
         excerptLength: 30,
       });
-    } else {
-      console.error("PagefindUI not found on window");
     }
-  };
-  script.onerror = function() {
-    console.error("Failed to load Pagefind script");
-    const searchEl = document.getElementById("search");
-    if (searchEl) {
-      searchEl.innerHTML = 
-        '<p style="color: var(--steel-400); padding: 20px; text-align: center;">Search is currently unavailable. Please try again later.</p>';
+  }
+
+  function loadPagefind() {
+    if (window.PagefindUI) {
+      // Already loaded, just init
+      initPagefind();
+      return;
     }
-  };
-  document.head.appendChild(script);
+    const script = document.createElement('script');
+    script.src = '/pagefind/pagefind-ui.js';
+    script.onload = initPagefind;
+    script.onerror = function() {
+      const searchEl = document.getElementById("search");
+      if (searchEl) {
+        searchEl.innerHTML =
+          '<p style="color: var(--steel-400); padding: 20px; text-align: center;">Search is currently unavailable. Please try again later.</p>';
+      }
+    };
+    document.head.appendChild(script);
+  }
+
+  document.addEventListener('astro:page-load', loadPagefind);
 </script>
 
 <style>
