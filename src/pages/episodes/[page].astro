@@ -1,0 +1,100 @@
+---
+import { getCollection } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import EpisodeCard from "../../components/EpisodeCard.astro";
+
+export async function getStaticPaths() {
+  const allEpisodes = await getCollection("episodes", ({ data }) => !data.draft);
+  const sortedEpisodes = allEpisodes.sort(
+    (a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
+  );
+
+  const PAGE_SIZE = 20;
+  const totalPages = Math.ceil(sortedEpisodes.length / PAGE_SIZE);
+
+  // Generate pages 2+ only — page 1 is handled by index.astro
+  return Array.from({ length: totalPages - 1 }, (_, i) => {
+    const pageNum = i + 2;
+    const start = (pageNum - 1) * PAGE_SIZE;
+    return {
+      params: { page: String(pageNum) },
+      props: {
+        pageEpisodes: sortedEpisodes.slice(start, start + PAGE_SIZE),
+        currentPage: pageNum,
+        totalPages,
+      },
+    };
+  });
+}
+
+const { pageEpisodes, currentPage, totalPages } = Astro.props;
+---
+
+<Base title={`Episodes — Page ${currentPage} | BitFlip.show`}>
+  <div class="episodes-page">
+    <h1 class="page-title">All Episodes</h1>
+    <div class="episodes-grid">
+      {pageEpisodes.map((episode) => (
+        <EpisodeCard episode={episode} />
+      ))}
+    </div>
+
+    <div class="pagination">
+      <a href={currentPage === 2 ? "/episodes" : `/episodes/${currentPage - 1}`} class="page-link">
+        ← Previous
+      </a>
+      <span class="page-info">Page {currentPage} of {totalPages}</span>
+      {currentPage < totalPages && (
+        <a href={`/episodes/${currentPage + 1}`} class="page-link">
+          Next →
+        </a>
+      )}
+    </div>
+  </div>
+</Base>
+
+<style>
+  .episodes-page {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .episodes-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 24px;
+    margin-top: 40px;
+  }
+  .page-link {
+    padding: 11px 22px;
+    background: transparent;
+    border: 1px solid var(--safety-500);
+    color: var(--safety-500);
+    text-decoration: none;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.2s;
+  }
+  .page-link:hover {
+    background: var(--safety-500);
+    color: var(--ink-900);
+  }
+  .page-info {
+    color: var(--meta-text);
+    font-size: 0.875rem;
+  }
+  @media (max-width: 768px) {
+    .episodes-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

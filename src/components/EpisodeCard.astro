@@ -1,12 +1,8 @@
 ---
+import { formatEpisodeDate } from "../lib/episodes";
 const { episode } = Astro.props;
 const { title, episodeNumber, date, summary, duration, tags } = episode.data;
-
-const formattedDate = new Date(date).toLocaleDateString("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-});
+const formattedDate = formatEpisodeDate(date);
 ---
 
 <a href={`/${episodeNumber}`} class="episode-card">

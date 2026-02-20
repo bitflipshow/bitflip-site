@@ -41,3 +41,11 @@ export function findEpisodeByNumber<T extends EpisodeLike>(
 ): T | undefined {
   return episodes.find((episode) => readEpisodeNumber(episode) === episodeNumber);
 }
+
+export function formatEpisodeDate(date: string): string {
+  return new Date(`${date}T12:00:00.000Z`).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}

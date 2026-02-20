@@ -1,7 +1,6 @@
 <div class="sticky-player" data-sticky transition:persist role="region" aria-label="Audio player">
   <div class="sticky-info">
     <div class="sticky-title" data-title>Nothing playing</div>
-    <div class="sticky-meta" data-meta>BitFlip.show</div>
   </div>
   <div class="sticky-controls" role="group" aria-label="Playback controls">
     <button class="sticky-button" type="button" data-back aria-label="Skip back 15 seconds">« 15s</button>
@@ -64,7 +63,6 @@
         if (state.src) {
           audio.src = state.src;
           title.textContent = state.title || "Now playing";
-          meta.textContent = "Resumed";
           audio.currentTime = state.currentTime || 0;
         }
       } catch (err) {
@@ -90,10 +88,10 @@
     loadState();
     syncUI();
 
-    playBtn.addEventListener("click", async () => {
+    playBtn.addEventListener("click", () => {
       if (!audio.src) return;
       if (audio.paused) {
-        await audio.play();
+        audio.play().catch((err) => console.warn("Playback failed:", err));
       } else {
         audio.pause();
       }
@@ -132,16 +130,29 @@
       playBtn.setAttribute("aria-label", "Play");
     });
 
-    window.addEventListener("bitflip:play", async (event) => {
+    window.addEventListener("bitflip:play", (event) => {
       const { src, title: epTitle } = event.detail || {};
       if (!src) return;
+
+      title.textContent = epTitle || "Now playing";
+
       if (audio.src !== src) {
         audio.src = src;
+        audio.load();
+        // Play as soon as enough data is available — stays within gesture context on iOS
+        const onCanPlay = () => {
+          audio.removeEventListener("canplay", onCanPlay);
+          audio.play().then(saveState).catch((err) => {
+            console.warn("Playback failed:", err);
+          });
+        };
+        audio.addEventListener("canplay", onCanPlay);
+      } else {
+        // Same src, just play directly
+        audio.play().then(saveState).catch((err) => {
+          console.warn("Playback failed:", err);
+        });
       }
-      title.textContent = epTitle || "Now playing";
-      meta.textContent = "Now playing";
-      await audio.play();
-      saveState();
     });
 
     window.addEventListener("bitflip:seek", (event) => {
@@ -182,12 +193,6 @@
   .sticky-title {
     font-weight: 600;
     font-size: 0.95rem;
-  }
-  .sticky-meta {
-    color: var(--steel-500);
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
   }
   .sticky-controls {
     display: flex;

@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 import { getCollection } from "astro:content";
 
 const hosts = await getCollection("hosts");
-const episodes = await getCollection("episodes");
+const episodes = await getCollection("episodes", ({ data }) => !data.draft);
 
 // Count episodes per host
 const episodeCounts = new Map<string, number>();
@@ -142,7 +142,7 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
   .host-role {
     color: var(--meta-text);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
     font-size: 0.75rem;
     margin-top: 4px;
   }

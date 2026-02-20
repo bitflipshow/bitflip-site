@@ -2,7 +2,7 @@
 import Base from "../layouts/Base.astro";
 import { getCollection } from "astro:content";
 
-const episodes = await getCollection("episodes");
+const episodes = await getCollection("episodes", ({ data }) => !data.draft);
 
 // Count episodes per tag
 const tagCounts = new Map<string, number>();

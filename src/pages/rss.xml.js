@@ -23,8 +23,8 @@ export async function GET(context) {
       return {
         title: episode.data.title,
         description: episode.data.summary,
-        pubDate: new Date(episode.data.date),
-        link: `/${episode.data.episodeNumber}`,
+        pubDate: new Date(`${episode.data.date}T12:00:00.000Z`),
+        link: `${siteUrl}/${episode.data.episodeNumber}`,
         enclosure: {
           url: episode.data.audioUrl,
           length: episode.data.audioSize,

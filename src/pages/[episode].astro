@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import AudioPlayer from "../components/AudioPlayer.astro";
 import { getCollection } from "astro:content";
+import { formatEpisodeDate } from "../lib/episodes";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -23,6 +24,7 @@ export async function getStaticPaths() {
 const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors } = episode.data;
+const formattedDate = formatEpisodeDate(date);
 
 const siteUrl = "https://bitflip.show";
 const jsonLd = {
@@ -64,7 +66,7 @@ const jsonLd = {
       <div>
         <div class="section-title">Episode #{episodeNumber}</div>
         <h1 class="detail-title">{title}</h1>
-        <div class="detail-date">{date}</div>
+        <div class="detail-date">{formattedDate}</div>
         <p class="detail-summary">{summary}</p>
         {tags && tags.length > 0 && (
           <div class="detail-tags">

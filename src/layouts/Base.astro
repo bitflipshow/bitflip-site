@@ -50,6 +50,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
       data-domain="bitflip.show"
       src="https://plausible.ktz.cloud/js/script.js"
     ></script>
+    <link rel="alternate" type="application/rss+xml" title="BitFlip.show Podcast Feed" href="/rss.xml" />
     <slot name="head" />
     <ClientRouter />
     <style>
@@ -91,15 +92,21 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     </main>
     {!hidePlayer && <StickyPlayer />}
     <script is:inline>
-      document.addEventListener('astro:page-load', () => {
+      function initNav() {
         const toggle = document.querySelector('.nav-toggle');
         const nav = document.getElementById('main-nav');
         if (!toggle || !nav) return;
-        toggle.addEventListener('click', () => {
+
+        // Remove any existing cloned listener by replacing the node
+        const freshToggle = toggle.cloneNode(true);
+        toggle.parentNode.replaceChild(freshToggle, toggle);
+
+        freshToggle.addEventListener('click', () => {
           const isOpen = nav.classList.toggle('is-open');
-          toggle.setAttribute('aria-expanded', String(isOpen));
+          freshToggle.setAttribute('aria-expanded', String(isOpen));
         });
-      });
+      }
+      document.addEventListener('astro:page-load', initNav);
     </script>
   </body>
 </html>

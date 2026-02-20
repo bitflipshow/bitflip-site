@@ -49,7 +49,7 @@ const recentEpisodes = episodes.slice(0, 4);
         </div>
       </div>
     </section>
-
+    
     <section class="recent-episodes">
       <h2>Recent Episodes</h2>
       <div class="episode-grid">
@@ -128,11 +128,11 @@ const recentEpisodes = episodes.slice(0, 4);
     padding: 10px 20px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(243, 139, 18, 0.3);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     text-decoration: none;
     color: var(--steel-300);
     font-weight: 500;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s, background 0.2s, color 0.2s;
     font-size: 0.9rem;
   }
 
@@ -195,8 +195,8 @@ const recentEpisodes = episodes.slice(0, 4);
     border-radius: 999px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    font-size: 0.875rem;
     transition: all 0.2s ease;
   }
 
