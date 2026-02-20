@@ -2,7 +2,7 @@
 import { getCollection } from "astro:content";
 import Base from "../layouts/Base.astro";
 
-const allEpisodes = await getCollection("episodes");
+const allEpisodes = await getCollection("episodes", ({ data }) => !data.draft);
 const sortedEpisodes = allEpisodes.sort(
   (a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
 );
@@ -22,8 +22,8 @@ const paginatedEpisodes = sortedEpisodes.slice(startIndex, endIndex);
     <div class="episodes-grid">
       {
         paginatedEpisodes.map((episode) => (
-          <a href={`/${episode.slug}`} class="episode-card">
-            <div class="episode-number">#{episode.data.number || episode.slug}</div>
+          <a href={`/${episode.data.episodeNumber}`} class="episode-card">
+            <div class="episode-number">#{episode.data.episodeNumber}</div>
             <h2>{episode.data.title}</h2>
             <p class="description">{episode.data.description}</p>
             <div class="episode-meta">

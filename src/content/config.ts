@@ -30,12 +30,13 @@ const episodes = defineCollection({
     transcriptUrl: z.string().url().optional(),
     chapters: chaptersSchema,
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().optional().default(false),
     hosts: z.array(z.string()).optional(),
     guests: z
       .array(
         z.object({
           name: z.string(),
-          role: z.string().optional(),
+          avatar: z.string().optional(),
           link: z.string().url().optional(),
         })
       )

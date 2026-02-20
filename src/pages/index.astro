@@ -2,7 +2,7 @@
 import { getCollection } from "astro:content";
 import Base from "../layouts/Base.astro";
 
-const episodes = (await getCollection("episodes")).sort((a, b) => {
+const episodes = (await getCollection("episodes", ({ data }) => !data.draft)).sort((a, b) => {
   // Sort by date (descending - newest first)
   return new Date(b.data.date).getTime() - new Date(a.data.date).getTime();
 });
@@ -53,8 +53,8 @@ const recentEpisodes = episodes.slice(0, 4);
       <h2>Recent Episodes</h2>
       <div class="episode-grid">
         {recentEpisodes.map((episode) => (
-          <a href={`/${episode.slug}`} class="episode-card">
-            <div class="episode-number"># {episode.data.number || episode.slug}</div>
+          <a href={`/${episode.data.episodeNumber}`} class="episode-card">
+            <div class="episode-number"># {episode.data.episodeNumber}</div>
             <h3>{episode.data.title}</h3>
             <p class="episode-description">{episode.data.description}</p>
             <div class="episode-meta">

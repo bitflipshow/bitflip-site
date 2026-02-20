@@ -4,7 +4,7 @@ import AudioPlayer from "../components/AudioPlayer.astro";
 import { getCollection } from "astro:content";
 
 export async function getStaticPaths() {
-  const episodes = await getCollection("episodes");
+  const episodes = await getCollection("episodes", ({ data }) => !data.draft);
   const allHosts = await getCollection("hosts");
   
   return episodes.map((episode) => {
@@ -22,7 +22,7 @@ export async function getStaticPaths() {
 
 const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
-const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
+const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors } = episode.data;
 ---
 
 <Base title={`#${episodeNumber} — ${title} | BitFlip.show`}>
@@ -52,18 +52,68 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
         )}
       </div>
     </div>
-    
-    {hosts && hosts.length > 0 && (
-      <div class="episode-hosts">
-        <div class="section-title">Hosts</div>
-        <div class="hosts-grid">
-          {hosts.map((host) => (
-            <a href={`/hosts/${host.slug}`} class="host-chip" key={host.slug}>
-              {host.data.avatar && (
-                <img src={host.data.avatar} alt={host.data.name} class="host-chip-avatar" />
-              )}
-              <span class="host-chip-name">{host.data.name}</span>
-            </a>
+
+    {(hosts && hosts.length > 0) || (guests && guests.length > 0) ? (
+      <div class="people-section">
+        {hosts && hosts.length > 0 && (
+          <div class="people-group">
+            <div class="section-title">Hosts</div>
+            <div class="people-grid">
+              {hosts.map((host) => (
+                <a href={`/hosts/${host.slug}`} class="person-chip" key={host.slug}>
+                  {host.data.avatar && (
+                    <img src={host.data.avatar} alt={host.data.name} class="person-chip-avatar" />
+                  )}
+                  <span class="person-chip-name">{host.data.name}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        {guests && guests.length > 0 && (
+          <div class="people-group">
+            <div class="section-title">Guests</div>
+            <div class="people-grid">
+              {guests.map((guest) => (
+                guest.link ? (
+                  <a href={guest.link} target="_blank" rel="noopener noreferrer" class="person-chip" key={guest.name}>
+                    {guest.avatar && (
+                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    )}
+                    <span class="person-chip-name">{guest.name}</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square person-chip-link-icon"></i>
+                  </a>
+                ) : (
+                  <div class="person-chip" key={guest.name}>
+                    {guest.avatar && (
+                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    )}
+                    <span class="person-chip-name">{guest.name}</span>
+                  </div>
+                )
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    ) : null}
+
+    {sponsors && sponsors.length > 0 && (
+      <div class="sponsors-section">
+        <div class="section-title">Sponsors</div>
+        <div class="sponsors-grid">
+          {sponsors.map((sponsor) => (
+            <div class="sponsor-card" key={sponsor.name}>
+              <div class="sponsor-header">
+                <span class="sponsor-name">{sponsor.name}</span>
+                {sponsor.url && (
+                  <a href={sponsor.url} target="_blank" rel="noopener noreferrer" class="sponsor-link">
+                    Visit <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                  </a>
+                )}
+              </div>
+              {sponsor.blurb && <p class="sponsor-blurb">{sponsor.blurb}</p>}
+            </div>
           ))}
         </div>
       </div>
@@ -133,53 +183,9 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
     border-color: var(--safety-600);
     transform: translateY(-1px);
   }
-  .episode-hosts {
-    background: rgba(12, 14, 16, 0.6);
-    border: 1px solid rgba(243, 139, 18, 0.2);
-    border-radius: var(--radius-md);
-    padding: 20px;
-  }
-  .hosts-grid {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .host-chip {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 16px;
-    background: rgba(243, 139, 18, 0.1);
-    border: 1px solid rgba(243, 139, 18, 0.3);
-    border-radius: 999px;
-    color: var(--steel-100);
-    transition: all 0.2s;
-  }
-  .host-chip:hover {
-    background: rgba(243, 139, 18, 0.2);
-    border-color: rgba(243, 139, 18, 0.5);
-    transform: translateY(-2px);
-  }
-  .host-chip-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 1px solid rgba(243, 139, 18, 0.3);
-  }
-  .host-chip-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
-  .detail-notes {
-    color: var(--steel-300);
-    line-height: 1.7;
-  }
-  
   .download-section {
     margin-top: 16px;
   }
-
   .download-link {
     display: inline-flex;
     align-items: center;
@@ -196,19 +202,138 @@ const { title, episodeNumber, date, summary, tags, coverImage } = episode.data;
     font-size: 0.875rem;
     transition: all 0.2s ease;
   }
-
   .download-link:hover {
     background: var(--safety-500);
     color: var(--ink-900);
   }
 
-  .download-link i {
-    font-size: 1rem;
+  /* People (hosts + guests) */
+  .people-section {
+    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
   }
-  
+  .people-group {
+    flex: 1;
+    min-width: 0;
+  }
+  .people-group:first-child {
+    flex: 2;
+  }
+  .people-grid {
+    display: flex;
+    gap: 10px;
+    flex-wrap: nowrap;
+  }
+  .person-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: rgba(243, 139, 18, 0.08);
+    border: 1px solid rgba(243, 139, 18, 0.25);
+    border-radius: 999px;
+    color: var(--steel-100);
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+  .person-chip:hover {
+    background: rgba(243, 139, 18, 0.18);
+    border-color: rgba(243, 139, 18, 0.5);
+    transform: translateY(-2px);
+  }
+  .person-chip-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    flex-shrink: 0;
+  }
+  .person-chip-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .person-chip-link-icon {
+    font-size: 0.7rem;
+    color: var(--steel-500);
+    margin-left: 2px;
+  }
+
+  /* Sponsors */
+  .sponsors-section {
+    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+  }
+  .sponsors-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .sponsor-card {
+    background: rgba(243, 139, 18, 0.05);
+    border: 1px solid rgba(243, 139, 18, 0.15);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    display: grid;
+    gap: 8px;
+  }
+  .sponsor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .sponsor-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--steel-100);
+  }
+  .sponsor-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--safety-500);
+    border: 1px solid rgba(243, 139, 18, 0.4);
+    padding: 4px 12px;
+    border-radius: 999px;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .sponsor-link:hover {
+    background: rgba(243, 139, 18, 0.15);
+    border-color: var(--safety-500);
+  }
+  .sponsor-blurb {
+    color: var(--steel-300);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .detail-notes {
+    color: var(--steel-300);
+    line-height: 1.7;
+  }
+
   @media (max-width: 860px) {
     .detail-hero {
       grid-template-columns: 1fr;
+    }
+    .people-section {
+      flex-direction: column;
+      gap: 20px;
     }
   }
 </style>

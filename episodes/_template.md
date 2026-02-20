@@ -2,6 +2,7 @@
 episodeNumber: 0000
 title: "Episode title"
 date: "01/01/2026"
+draft: false
 summary: "Short summary for cards and RSS"
 audioUrl: "https://example.com/audio/episode.mp3"
 audioSize: 12345678
@@ -18,15 +19,20 @@ chapters:
 tags:
   - infrastructure
   - networking
-guests:
-  - name: "Guest Name"
-    role: "Title or affiliation"
-    link: "https://example.com"
 hosts:
   - alex
   - adam
   - geoff
   - stephen
+### Optional
+guests:
+  - name: "Guest Name"
+    role: "Title or affiliation"
+    link: "https://example.com"
+sponsors:
+  - name: "Acme Corp"
+    url: "https://acme.example.com"
+    blurb: "Acme makes the tools that keep your infrastructure running."
 ---
 
 ## What we cover
