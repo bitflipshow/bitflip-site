@@ -1,7 +1,7 @@
 ---
 episodeNumber: 0000
 title: "Episode title"
-date: "01/01/2026"
+date: "January 1, 2026"
 draft: false
 summary: "Short summary for cards and RSS"
 audioUrl: "https://example.com/audio/episode.mp3"

@@ -1,5 +1,5 @@
 ---
-name: "Adam Morales"
+name: "Adam"
 role: "Co-host"
 avatar: "/images/hosts/adam.jpg"
 order: 2
