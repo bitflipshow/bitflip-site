@@ -53,6 +53,7 @@ const jsonLd = {
   title={`#${episodeNumber} — ${title} | BitFlip.show`}
   description={summary}
   ogImage={coverImage}
+  ogType="article"
 >
   <Fragment slot="head">
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />

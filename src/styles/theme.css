@@ -235,6 +235,10 @@ main {
     overflow: hidden;
   }
 
+  .nav-links a[aria-current="page"] {
+    color: var(--safety-500);
+  }
+
   .nav-links.is-open {
     display: flex;
   }

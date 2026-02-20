@@ -5,8 +5,9 @@ import { ClientRouter } from 'astro:transitions';
 
 const {
   title = "BitFlip.show",
-  description = "The pragmatic side of infrastructure. A podcast hosted by Alex, Adam, Geoff, and Stephen.",
+  description = "...",
   ogImage = "/images/podcast-cover.png",
+  ogType = "website",
   hideNav = false,
   hidePlayer = false,
 } = Astro.props;
@@ -28,7 +29,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     <link rel="canonical" href={canonicalURL} />
 
     <!-- Open Graph -->
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -54,8 +55,48 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     <slot name="head" />
     <ClientRouter />
     <style>
-      .nav-links a[aria-current="page"] {
-        color: var(--safety-500);
+      .site-footer {
+        padding: 24px 0 16px;
+        border-top: 1px solid rgba(243, 139, 18, 0.12);
+        margin-top: 60px;
+      }
+
+      .footer-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .footer-copy {
+        color: var(--steel-500);
+        font-size: 0.85rem;
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 20px;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .footer-links a {
+        color: var(--steel-500);
+        transition: color 0.2s;
+      }
+
+      .footer-links a:hover {
+        color: var(--steel-300);
+      }
+
+      @media (max-width: 480px) {
+        .footer-inner {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 12px;
+        }
       }
     </style>
   </head>
@@ -77,7 +118,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
           </button>
           <nav id="main-nav" class="nav-links" aria-label="Main navigation">
             <a href="/about" aria-current={Astro.url.pathname === '/about' ? 'page' : undefined}>About</a>
-            <a href="/episodes" aria-current={Astro.url.pathname === '/episodes' ? 'page' : undefined}>Episodes</a>
+            <a href="/episodes" aria-current={Astro.url.pathname.startsWith('/episodes') ? 'page' : undefined}>Episodes</a>
             <a href="/hosts" aria-current={Astro.url.pathname === '/hosts' ? 'page' : undefined}>Hosts</a>
             <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
             <a href="/search" aria-current={Astro.url.pathname === '/search' ? 'page' : undefined}>Search</a>
@@ -89,6 +130,17 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     </header>
     <main class="container" data-pagefind-body>
       <slot />
+      <footer class="site-footer">
+        <div class="footer-inner">
+          <span class="footer-copy">© {new Date().getFullYear()} BitFlip.show</span>
+          <nav class="footer-links" aria-label="Footer navigation">
+            <a href="/about">About</a>
+            <a href="/subscribe">Subscribe</a>
+            <a href="/contact">Contact</a>
+            <a href="/rss.xml">RSS</a>
+          </nav>
+        </div>
+      </footer>
     </main>
     {!hidePlayer && <StickyPlayer />}
     <script is:inline>
