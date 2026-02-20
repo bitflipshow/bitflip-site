@@ -1,0 +1,193 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="About | BitFlip.show">
+  <section class="about">
+    <h1 class="page-title">About BitFlip</h1>
+
+    <div class="about-grid">
+      <div class="about-card primary">
+        <div class="section-title">The Show</div>
+        <p>
+          BitFlip is an independent podcast about the pragmatic side of infrastructure.
+          We talk about self-hosting, homelabs, open source, and the real-world decisions
+          engineers make every day — without the enterprise fluff.
+        </p>
+        <p>
+          Hosted by Alex, Adam, Geoff, and Stephen, each episode digs into the tools,
+          workflows, and hard-won lessons that keep systems running.
+        </p>
+      </div>
+
+      <div class="about-card">
+        <div class="section-title">Community</div>
+        <p>Join the conversation and connect with other listeners and the hosts.</p>
+        <div class="social-links">
+          <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer" class="social-link discord">
+            <i class="fa-brands fa-discord"></i>
+            <div>
+              <span class="social-name">Discord</span>
+              <span class="social-desc">Join the server</span>
+            </div>
+          </a>
+          <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="social-link github">
+            <i class="fa-brands fa-github"></i>
+            <div>
+              <span class="social-name">GitHub</span>
+              <span class="social-desc">Follow our projects</span>
+            </div>
+          </a>
+          <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="social-link mastodon">
+            <i class="fa-brands fa-mastodon"></i>
+            <div>
+              <span class="social-name">Mastodon</span>
+              <span class="social-desc">@BitFlipShow@techhub.social</span>
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div class="about-card">
+          <div class="section-title">The Hosts</div>
+          <p>Meet the people behind the microphones.</p>
+          <a href="/hosts" class="about-button">
+            <i class="fa-solid fa-users"></i> Meet the Hosts
+          </a>
+        </div>
+
+        <div class="about-card">
+          <div class="section-title">Contact</div>
+          <p>Got a topic suggestion, feedback, or just want to say hello?</p>
+          <a href="/contact" class="about-button">
+            <i class="fa-solid fa-envelope"></i> Get in Touch
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .about-grid {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .about-card {
+    background: rgba(12, 14, 16, 0.6);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: var(--radius-md);
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .about-card.primary {
+    grid-column: 1 / -1;
+  }
+
+  .about-card p {
+    color: var(--steel-300);
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  .social-links {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .social-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 0.2s;
+  }
+
+  .social-link i {
+    font-size: 1.4rem;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .social-link div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .social-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .social-desc {
+    font-size: 0.8rem;
+    color: var(--steel-500);
+  }
+
+  .social-link.discord i { color: #5865f2; }
+  .social-link.discord:hover { border-color: #5865f2; background: rgba(88, 101, 242, 0.08); }
+
+  .social-link.github i { color: #ffffff; }
+  .social-link.github:hover { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); }
+
+  .social-link.mastodon i { color: #6364ff; }
+  .social-link.mastodon:hover { border-color: #6364ff; background: rgba(99, 100, 255, 0.08); }
+
+  .about-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    margin-top: auto;
+    background: transparent;
+    border: 1px solid var(--safety-500);
+    color: var(--safety-500);
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+    align-self: flex-start;
+  }
+
+  .about-button:hover {
+    background: var(--safety-500);
+    color: var(--ink-900);
+  }
+
+  .right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .right-column .about-card {
+    flex: 1;
+  }
+
+  @media (max-width: 768px) {
+    .about-grid {
+      grid-template-columns: 1fr;
+    }
+    .about-card.primary {
+      grid-column: 1;
+    }
+    .right-column {
+      flex-direction: column;
+    }
+  }
+</style>

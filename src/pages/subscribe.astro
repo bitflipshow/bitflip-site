@@ -31,28 +31,6 @@ import Base from "../layouts/Base.astro";
           <i class="fa-brands fa-youtube"></i> Watch on YouTube
         </a>
       </div>
-
-      <div class="subscribe-card">
-        <div class="subscribe-icon github">
-          <i class="fa-brands fa-github"></i>
-        </div>
-        <h2>GitHub</h2>
-        <p>Follow our projects and contributions on GitHub.</p>
-        <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="subscribe-button github">
-          <i class="fa-brands fa-github"></i> Follow on GitHub
-        </a>
-      </div>
-
-      <div class="subscribe-card">
-        <div class="subscribe-icon mastodon">
-          <i class="fa-brands fa-mastodon"></i>
-        </div>
-        <h2>Mastodon</h2>
-        <p>Follow us on Mastodon for updates and discussions.</p>
-        <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="subscribe-button mastodon">
-          <i class="fa-brands fa-mastodon"></i> Follow on Mastodon
-        </a>
-      </div>
     </div>
   </div>
 </Base>
@@ -71,7 +49,7 @@ import Base from "../layouts/Base.astro";
 
   .subscribe-options {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 24px;
   }
 
@@ -182,12 +160,6 @@ import Base from "../layouts/Base.astro";
   .subscribe-button.mastodon:hover {
     background: #6364ff;
     color: white;
-  }
-
-  @media (max-width: 1024px) {
-    .subscribe-options {
-      grid-template-columns: repeat(2, 1fr);
-    }
   }
 
   @media (max-width: 768px) {
