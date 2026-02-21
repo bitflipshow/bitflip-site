@@ -11,7 +11,7 @@ The official site for BitFlip.show — the pragmatic side of infrastructure.
 
 ## Content authoring
 
-Episodes are authored as single Markdown files in `episodes` (symlinked to `src/content/episodes/`) with YAML frontmatter and a Markdown body.
+Episodes are authored as single Markdown files in `src/content/episodes/` (symlinked to `episodes`) with YAML frontmatter and a Markdown body.
 
 Required frontmatter:
 
@@ -58,11 +58,34 @@ The Markdown body is used for full show notes and links.
 
 ## Publishing workflow
 
-1. Record and mix audio.
-2. Run `jivedrop` to generate MP3 with embedded metadata.
-3. Upload MP3 to R2 and copy the public URL.
-4. Update the episode Markdown frontmatter with `audioUrl`, `audioSize`, and `duration`.
-5. Commit and push — GitHub Actions deploys to Cloudflare Pages.
+The Markdown body is used for full show notes and links.
+
+1. **Record and mix audio.** Export your final mix as WAV or FLAC.
+2. **Run `jivedrop` to generate the MP3.**
+   [jivedrop](https://github.com/linuxmatters/jivedrop) encodes a distribution-ready MP3 (112kbps CBR mono, ID3v2 tags, embedded cover art) in one command:
+```bash
+   jivedrop recording.flac \
+     --title "Your Episode Title" \
+     --num 42 \
+     --artist "Bitflip" \
+     --album "Bitflip" \
+     --date "2025-03-01" \
+     --comment "https://bitflip.show/42" \
+     --cover artwork.png
+```
+
+   This produces `Bitflip-42.mp3`. jivedrop will print the `duration` and file size when it finishes — keep those handy for the next step.
+
+3. **Upload the MP3 to R2 and copy the public URL.**
+4. **Update the episode frontmatter** in `episodes/00XX-slug.md` with the values from steps 2 and 3:
+```yaml
+   audioUrl: "https://cdn.bitflip.show/bitflip-42.mp3"
+   audioSize: 52428800   # bytes, from jivedrop output
+   duration: "1:02:34"   # from jivedrop output
+```
+5. **Commit and push** — GitHub Actions deploys to Cloudflare Pages.
+
+> Download jivedrop binaries for Linux and macOS from the [releases page](https://github.com/linuxmatters/jivedrop/releases).
 
 ## Audio player
 
