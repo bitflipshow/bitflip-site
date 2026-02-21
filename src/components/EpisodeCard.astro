@@ -16,12 +16,11 @@ const formattedDate = formatEpisodeDate(date);
     </div>
     {tags && tags.length > 0 && (
       <div class="episode-tags">
-        {tags.map((tag) => (
-          <span class="tag" key={tag}>{tag}</span>
+        {tags.map((tag: string) => (
+          <span class="tag">{tag}</span>
         ))}
       </div>
     )}
-  </div>
 </a>
 
 <style>

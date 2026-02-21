@@ -2,6 +2,7 @@
 import { getCollection } from "astro:content";
 import Base from "../layouts/Base.astro";
 import EpisodeCard from "../components/EpisodeCard.astro";
+import { SITE, SOCIAL } from "../config";
 
 const episodes = (await getCollection("episodes", ({ data }) => !data.draft)).sort((a, b) => {
   // Sort by date (descending - newest first)
@@ -27,7 +28,7 @@ const recentEpisodes = episodes.slice(0, 4);
               <i class="fa-solid fa-rss"></i>
               <span>RSS</span>
             </a>
-            <a href="https://www.youtube.com/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="link-button youtube">
+            <a href={SOCIAL.youtube} target="_blank" rel="noopener noreferrer" class="link-button youtube">
               <i class="fa-brands fa-youtube"></i>
               <span>YouTube</span>
             </a>
@@ -37,11 +38,11 @@ const recentEpisodes = episodes.slice(0, 4);
         <div class="follow-block">
           <div class="section-label">FOLLOW</div>
           <div class="link-buttons">
-            <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="link-button github">
+            <a href={SOCIAL.github} target="_blank" rel="noopener noreferrer" class="link-button github">
               <i class="fa-brands fa-github"></i>
               <span>GitHub</span>
             </a>
-            <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="link-button mastodon">
+            <a href={SOCIAL.mastodon} target="_blank" rel="noopener noreferrer" class="link-button mastodon">
               <i class="fa-brands fa-mastodon"></i>
               <span>Mastodon</span>
             </a>

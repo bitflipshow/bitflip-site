@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { SOCIAL } from "../config";
 ---
 
 <Base title="Contact | BitFlip.show">
@@ -13,8 +14,8 @@ import Base from "../layouts/Base.astro";
       <p class="form-notice">
         <i class="fa-solid fa-circle-info"></i>
         This form isn't wired up yet — in the meantime, reach us on
-        <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer">Discord</a>
-        or <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer">Mastodon</a>.
+        <a href={SOCIAL.discord} target="_blank" rel="noopener noreferrer">Discord</a>
+        or <a href={SOCIAL.mastodon} target="_blank" rel="noopener noreferrer">Mastodon</a>.
       </p>
       <form class="contact-form" novalidate>
         <div class="field">

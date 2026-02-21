@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { SOCIAL } from "../config";
 ---
 
 <Base title="About | BitFlip.show">
@@ -24,25 +25,25 @@ import Base from "../layouts/Base.astro";
         <div class="section-title">Community</div>
         <p>Join the conversation and connect with other listeners and the hosts.</p>
         <div class="social-links">
-          <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer" class="social-link discord">
+          <a href={SOCIAL.discord} target="_blank" rel="noopener noreferrer" class="social-link discord">
             <i class="fa-brands fa-discord"></i>
             <div>
               <span class="social-name">Discord</span>
               <span class="social-desc">Join the server</span>
             </div>
           </a>
-          <a href="https://github.com/bitflipshow" target="_blank" rel="noopener noreferrer" class="social-link github">
+          <a href={SOCIAL.github} target="_blank" rel="noopener noreferrer" class="social-link github">
             <i class="fa-brands fa-github"></i>
             <div>
               <span class="social-name">GitHub</span>
               <span class="social-desc">Follow our projects</span>
             </div>
           </a>
-          <a href="https://techhub.social/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="social-link mastodon">
+          <a href={SOCIAL.mastodon} target="_blank" rel="noopener noreferrer" class="social-link mastodon">
             <i class="fa-brands fa-mastodon"></i>
             <div>
               <span class="social-name">Mastodon</span>
-              <span class="social-desc">@BitFlipShow@techhub.social</span>
+              <span class="social-desc">{SOCIAL.mastodonHandle}</span>
             </div>
           </a>
         </div>

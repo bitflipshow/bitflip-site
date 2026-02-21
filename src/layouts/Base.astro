@@ -2,11 +2,12 @@
 import "../styles/theme.css";
 import StickyPlayer from "../components/StickyPlayer.astro";
 import { ClientRouter } from 'astro:transitions';
+import { SITE, SOCIAL } from "../config";
 
 const {
-  title = "BitFlip.show",
-  description = "...",
-  ogImage = "/images/podcast-cover.png",
+  title = SITE.title,
+  description = SITE.description,
+  ogImage = SITE.coverImage,
   ogType = "website",
   hideNav = false,
   hidePlayer = false,
@@ -106,9 +107,9 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
         <img class="brand-logo" src="/images/bitflip-logo.png" alt="BitFlip logo" />
         <div>
           <div class="site-title">
-            <a href="/">BitFlip.show</a>
+            <a href="/">{SITE.title}</a>
           </div>
-          <div class="site-tagline">The pragmatic side of infrastructure.</div>
+          <div class="site-tagline">{SITE.tagline}</div>
         </div>
       </div>
       {!hideNav && (
@@ -122,7 +123,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
             <a href="/hosts" aria-current={Astro.url.pathname === '/hosts' ? 'page' : undefined}>Hosts</a>
             <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
             <a href="/search" aria-current={Astro.url.pathname === '/search' ? 'page' : undefined}>Search</a>
-            <a href="https://discord.gg/XYZPDQ" target="_blank" rel="noopener noreferrer">Discord</a>
+            <a href={SOCIAL.discord} target="_blank" rel="noopener noreferrer">Discord</a>
             <a href="/contact" aria-current={Astro.url.pathname === '/contact' ? 'page' : undefined}>Contact</a>
           </nav>
         </>

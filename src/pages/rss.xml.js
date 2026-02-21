@@ -1,5 +1,6 @@
 import rss from "@astrojs/rss";
 import { getCollection } from "astro:content";
+import { SITE } from "../config";
 
 export async function GET(context) {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -12,8 +13,8 @@ export async function GET(context) {
   const siteUrl = context.site?.toString().replace(/\/$/, "") || "https://bitflip.show";
 
   return rss({
-    title: "BitFlip.show",
-    description: "The pragmatic side of infrastructure.",
+    title: SITE.title,
+    description: SITE.tagline,
     site: siteUrl,
     items: sortedEpisodes.map((episode) => {
       const coverUrl = episode.data.coverImage?.startsWith("http")
@@ -43,12 +44,12 @@ export async function GET(context) {
     }),
     customData: `
     <language>en-us</language>
-    <itunes:author>BitFlip.show</itunes:author>
-    <itunes:summary>The pragmatic side of infrastructure.</itunes:summary>
+    <itunes:author>${SITE.title}</itunes:author>
+    <itunes:summary>${SITE.tagline}</itunes:summary>
     <itunes:type>episodic</itunes:type>
     <itunes:owner>
-      <itunes:name>BitFlip.show</itunes:name>
-      <itunes:email>podcast@bitflip.show</itunes:email>
+      <itunes:name>${SITE.title}</itunes:name>
+      <itunes:email>${SITE.email}</itunes:email>
     </itunes:owner>
     <itunes:explicit>no</itunes:explicit>
     <itunes:category text="Technology" />

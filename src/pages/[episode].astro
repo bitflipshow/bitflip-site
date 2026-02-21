@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import AudioPlayer from "../components/AudioPlayer.astro";
 import { getCollection } from "astro:content";
 import { formatEpisodeDate } from "../lib/episodes";
+import { SITE } from "../lib/../config";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -26,7 +27,7 @@ const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors } = episode.data;
 const formattedDate = formatEpisodeDate(date);
 
-const siteUrl = "https://bitflip.show";
+const siteUrl = SITE.url;
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "PodcastEpisode",
@@ -43,8 +44,8 @@ const jsonLd = {
   },
   "partOfSeries": {
     "@type": "PodcastSeries",
-    "name": "BitFlip.show",
-    "url": siteUrl
+    "name": SITE.title,
+    "url": SITE.url
   }
 };
 ---
@@ -71,8 +72,8 @@ const jsonLd = {
         <p class="detail-summary">{summary}</p>
         {tags && tags.length > 0 && (
           <div class="detail-tags">
-            {tags.map((tag) => (
-              <a href={`/tags/${tag}`} class="tag" key={tag}>#{tag}</a>
+            {tags.map((tag: string) => (
+              <a href={`/tags/${tag}`} class="tag">#{tag}</a>
             ))}
           </div>
         )}
@@ -93,7 +94,7 @@ const jsonLd = {
             <div class="section-title">Hosts</div>
             <div class="people-grid">
               {hosts.map((host) => (
-                <a href={`/hosts/${host.slug}`} class="person-chip" key={host.slug}>
+                <a href={`/hosts/${host.slug}`} class="person-chip">
                   {host.data.avatar && (
                     <img src={host.data.avatar} alt={host.data.name} class="person-chip-avatar" />
                   )}
@@ -109,7 +110,7 @@ const jsonLd = {
             <div class="people-grid">
               {guests.map((guest) => (
                 guest.link ? (
-                  <a href={guest.link} target="_blank" rel="noopener noreferrer" class="person-chip" key={guest.name}>
+                  <a href={guest.link} target="_blank" rel="noopener noreferrer" class="person-chip" >
                     {guest.avatar && (
                       <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
                     )}
@@ -117,7 +118,7 @@ const jsonLd = {
                     <i class="fa-solid fa-arrow-up-right-from-square person-chip-link-icon"></i>
                   </a>
                 ) : (
-                  <div class="person-chip" key={guest.name}>
+                  <div class="person-chip" >
                     {guest.avatar && (
                       <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
                     )}
@@ -136,7 +137,7 @@ const jsonLd = {
         <div class="section-title">Sponsors</div>
         <div class="sponsors-grid">
           {sponsors.map((sponsor) => (
-            <div class="sponsor-card" key={sponsor.name}>
+            <div class="sponsor-card" >
               <div class="sponsor-header">
                 <span class="sponsor-name">{sponsor.name}</span>
                 {sponsor.url && (

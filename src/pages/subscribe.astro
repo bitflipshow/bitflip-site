@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { SOCIAL } from "../config";
 ---
 
 <Base title="Subscribe - BitFlip.show">
@@ -27,7 +28,7 @@ import Base from "../layouts/Base.astro";
         </div>
         <h2>YouTube</h2>
         <p>Watch episodes and subscribe to our channel on YouTube.</p>
-        <a href="https://www.youtube.com/@BitFlipShow" target="_blank" rel="noopener noreferrer" class="subscribe-button youtube">
+        <a href={SOCIAL.youtube} target="_blank" rel="noopener noreferrer" class="subscribe-button youtube">
           <i class="fa-brands fa-youtube"></i> Watch on YouTube
         </a>
       </div>
