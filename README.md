@@ -11,26 +11,26 @@ The official site for BitFlip.show — the pragmatic side of infrastructure.
 
 ## Content authoring
 
-Episodes are authored as single Markdown files in `src/content/episodes/` with YAML frontmatter and a Markdown body.
+Episodes are authored as single Markdown files in `episodes` (symlinked to `src/content/episodes/`) with YAML frontmatter and a Markdown body.
 
 Required frontmatter:
 
 ```yaml
-episodeNumber: 101
+episodeNumber: 0001
 title: "Episode title"
 date: "2026-01-30"
 summary: "Short summary for cards and RSS"
 audioUrl: "https://<public-r2-url>/episode.mp3"
 audioSize: 12345678
-
 duration: "00:58:12"
-coverImage: "/images/cover-101.png"
 explicit: false
 ```
 
 Optional:
 
 ```yaml
+draft: false
+coverImage: "/images/cover-101.png" # Default is /images/podcast-cover.png, use for special episode covers
 youtubeUrl: "https://youtube.com/watch?v=..."
 transcriptUrl: "https://example.com/transcripts/episode.txt"
 chapters:
@@ -39,10 +39,15 @@ chapters:
 tags:
   - backups
   - networking
+hosts:
+  - geoff
+  - adam
+  - stephen
+  - alex
 guests:
-  - name: "Guest Name"
-    role: "Title or affiliation"
-    link: "https://example.com"
+  - name: "Jane Smith"
+    avatar: "generic-guest.jpg"
+    link: "https://janesmith.dev"
 sponsors:
   - name: "Sponsor Name"
     url: "https://example.com"
@@ -72,6 +77,12 @@ The site uses a sticky footer player that can be triggered from the episode list
 ```bash
 npm install
 npm run dev
+```
+
+## Local testing
+
+```bash
+npm run build && npm run preview -- --host
 ```
 
 ## Deploy
