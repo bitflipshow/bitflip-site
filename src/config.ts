@@ -9,7 +9,7 @@ export const SITE = {
 };
 
 export const SOCIAL = {
-  discord: "https://discord.gg/XYZPDQ",
+  discord: "https://discord.gg/pSrrdeyGPf",
   github: "https://github.com/bitflipshow",
   mastodon: "https://techhub.social/@BitFlipShow",
   mastodonHandle: "@BitFlipShow@techhub.social",
