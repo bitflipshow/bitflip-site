@@ -2,6 +2,16 @@ import rss from "@astrojs/rss";
 import { getCollection } from "astro:content";
 import { SITE } from "../config";
 
+function inferEnclosureType(audioUrl) {
+  const normalized = audioUrl.split("?")[0].toLowerCase();
+  if (normalized.endsWith(".wav")) return "audio/wav";
+  if (normalized.endsWith(".flac")) return "audio/flac";
+  if (normalized.endsWith(".m4a")) return "audio/mp4";
+  if (normalized.endsWith(".ogg")) return "audio/ogg";
+  if (normalized.endsWith(".opus")) return "audio/opus";
+  return "audio/mpeg";
+}
+
 export async function GET(context) {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
   
@@ -29,7 +39,7 @@ export async function GET(context) {
         enclosure: {
           url: episode.data.audioUrl,
           length: episode.data.audioSize,
-          type: "audio/mpeg",
+          type: inferEnclosureType(episode.data.audioUrl),
         },
         customData: `
         <itunes:title>${episode.data.title}</itunes:title>
