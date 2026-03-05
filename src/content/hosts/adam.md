@@ -4,7 +4,11 @@ role: "Co-host"
 avatar: "/images/hosts/adam.jpg"
 order: 2
 social:
-  github: "https://github.com/kodiak879"
+  twitter: "https://x.com/adam879"
+  website: "https://unraid.net/"
+  mastodon: "https://techhub.social/@kodiak879"
 ---
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+Currently the VP of Quality & Support at Lime Technology supporting users running Linux based Unraid OS in their homes and businesses. Prior to that, and for the majority of my career I led the Quality & Support departments for iXsystems supporting enterprise customers running FreeBSD and more recently Linux based TrueNAS servers. And if you go in the way, way back machine it all started when I was a storage admin working for the local government in my hometown of Santa Cruz, CA.
+
+In my personal time I enjoy going down endless rabbit holes exploring technology in my homelab (often escaping to other parts of the home, office, and vehicles 🙃), video games, rock climbing (specifically bouldering), Brazilian Jiu-Jitsu,riding motorcycles, going to music festivals, travel, and anything to do with spending time near or in the ocean.
