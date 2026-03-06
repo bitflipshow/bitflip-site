@@ -24,7 +24,7 @@ export async function getStaticPaths() {
 
 const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
-const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors } = episode.data;
+const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors, youtubeUrl } = episode.data;
 const formattedDate = formatEpisodeDate(date);
 
 const siteUrl = SITE.url;
@@ -77,11 +77,18 @@ const jsonLd = {
             ))}
           </div>
         )}
-        {episode.data.audioUrl && (
+        {(episode.data.audioUrl || youtubeUrl) && (
           <div class="download-section">
-            <a href={episode.data.audioUrl} download class="download-link">
-              <i class="fa-solid fa-download"></i> Download MP3
-            </a>
+            {episode.data.audioUrl && (
+              <a href={episode.data.audioUrl} download class="download-link">
+                <i class="fa-solid fa-download"></i> Download MP3
+              </a>
+            )}
+            {youtubeUrl && (
+              <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" class="download-link youtube-link">
+                <i class="fa-brands fa-youtube"></i> Watch on YouTube
+              </a>
+            )}
           </div>
         )}
       </div>
@@ -219,6 +226,19 @@ const jsonLd = {
   }
   .download-section {
     margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .youtube-link {
+    border-color: #ff0000;
+    color: #ff0000;
+  }
+
+  .youtube-link:hover {
+    background: #ff0000;
+    color: #fff;
   }
   .download-link {
     display: inline-flex;

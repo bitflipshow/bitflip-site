@@ -2,9 +2,9 @@
 import { parseChapterTime } from "../lib/chapters";
 
 const { episode } = Astro.props;
-const { title, episodeNumber, duration, audioUrl, chapters } = episode.data;
+const { title, episodeNumber, duration, audioUrl, chapters, youtubeUrl } = episode.data;
 const playerId = `episode-player-${episodeNumber}`;
-const chapterItems = (chapters ?? []).map((chapter) => ({
+const chapterItems = (chapters ?? []).map((chapter: { time: string; title: string }) => ({
   ...chapter,
   seconds: parseChapterTime(chapter.time),
 }));
@@ -27,14 +27,31 @@ const chapterItems = (chapters ?? []).map((chapter) => ({
       Play
     </button>
   </div>
-  {chapterItems.length > 0 && (
-    <div class="player-chapters">
-      {chapterItems.map((chapter) => (
-        <button class="chapter" type="button" data-seek={chapter.seconds}>
-          <span class="chapter-time">{chapter.time}</span>
-          <span>{chapter.title}</span>
-        </button>
-      ))}
+  {(chapterItems.length > 0 || youtubeUrl) && (
+    <div class="player-media">
+      {youtubeUrl && (() => {
+        const videoId = new URL(youtubeUrl).searchParams.get("v");
+        return videoId ? (
+          <div class="player-youtube">
+            <iframe
+              src={`https://www.youtube.com/embed/${videoId}`}
+              title={`${title} on YouTube`}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+        ) : null;
+      })()}
+      {chapterItems.length > 0 && (
+        <div class="player-chapters">
+          {chapterItems.map((chapter: { time: string; title: string; seconds: number }) => (
+            <button class="chapter" type="button" data-seek={chapter.seconds}>
+              <span class="chapter-time">{chapter.time}</span>
+              <span>{chapter.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )}
 </div>
@@ -119,6 +136,32 @@ const chapterItems = (chapters ?? []).map((chapter) => ({
     .player-header {
       flex-direction: column;
       align-items: flex-start;
+    }
+  }
+  .player-media {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .player-media > :only-child {
+    grid-column: 1 / -1;
+  }
+  .player-youtube {
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    aspect-ratio: 16 / 9;
+  }
+  .player-youtube iframe {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border: none;
+  }
+  @media (max-width: 720px) {
+    .player-media {
+      grid-template-columns: 1fr;
     }
   }
 </style>
