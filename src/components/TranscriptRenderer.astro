@@ -1,0 +1,410 @@
+---
+// TranscriptRenderer.astro
+// Drop this anywhere after <Content /> on the episode page.
+// It finds the ## Transcript section in the rendered HTML,
+// removes it from the prose flow, and replaces it with a
+// styled collapsible transcript widget.
+---
+
+<script type="module">
+  function initTranscript() {
+    const notes = document.querySelector(".detail-notes");
+    if (!notes) return;
+
+    // Find the <h2> whose text is "Transcript"
+    const headings = notes.querySelectorAll("h2");
+    let transcriptHeading = null;
+    for (const h of headings) {
+      if (h.textContent.trim().toLowerCase() === "transcript") {
+        transcriptHeading = h;
+        break;
+      }
+    }
+    if (!transcriptHeading) return;
+
+    // Collect all sibling nodes that belong to the transcript section
+    // (everything after the heading until the next h2 or end of notes)
+    const transcriptNodes = [];
+    let node = transcriptHeading.nextElementSibling;
+    while (node && node.tagName !== "H2") {
+      transcriptNodes.push(node);
+      node = node.nextElementSibling;
+    }
+
+    // Parse speaker lines from the collected nodes.
+    // Source format per paragraph:
+    //   <strong>Speaker</strong>: text\n<em>timestamp</em>
+    const cues = [];
+    for (const el of transcriptNodes) {
+      // Each rendered markdown paragraph looks like:
+      // <p><strong>Alex</strong>: Some words.\n<em>00:00</em></p>
+      // We walk all <p> children inside (could be directly or wrapped)
+      const paras = el.matches("p") ? [el] : Array.from(el.querySelectorAll("p"));
+      for (const p of paras) {
+        const strong = p.querySelector("strong");
+        const em = p.querySelector("em");
+        if (!strong) continue;
+
+        const speaker = strong.textContent.trim();
+        const timestamp = em ? em.textContent.trim() : null;
+
+        // Text = everything after the <strong> tag, before the <em>
+        let text = p.textContent;
+        // Strip speaker name + colon
+        text = text.replace(/^[^:]+:\s*/, "");
+        // Strip trailing timestamp
+        if (timestamp) text = text.replace(timestamp, "").trim();
+        text = text.replace(/\*$/, "").trim();
+
+        if (speaker && text) {
+          cues.push({ speaker, text, timestamp });
+        }
+      }
+    }
+
+    if (!cues.length) return; // Nothing parsed, leave as-is
+
+    // Remove original transcript nodes from the DOM
+    transcriptHeading.remove();
+    for (const el of transcriptNodes) el.remove();
+
+    // Build the widget and append it after .detail-notes
+    const widget = buildWidget(cues);
+    notes.insertAdjacentElement("afterend", widget);
+  }
+
+  function buildWidget(cues) {
+    // Group consecutive cues by the same speaker into "turns"
+    const turns = [];
+    for (const cue of cues) {
+      const last = turns[turns.length - 1];
+      if (last && last.speaker === cue.speaker && !cue.timestamp) {
+        last.lines.push(cue.text);
+      } else {
+        turns.push({
+          speaker: cue.speaker,
+          timestamp: cue.timestamp,
+          lines: [cue.text],
+        });
+      }
+    }
+
+    // Assign a consistent color index per speaker
+    const speakerMap = new Map();
+    let colorIdx = 0;
+    for (const turn of turns) {
+      if (!speakerMap.has(turn.speaker)) {
+        speakerMap.set(turn.speaker, colorIdx++ % 6);
+      }
+    }
+
+    // Outer section
+    const section = document.createElement("div");
+    section.className = "transcript-section";
+
+    // Toggle button
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "transcript-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", "transcript-body");
+    toggle.innerHTML = `
+      <span class="transcript-toggle-left">
+        <i class="fa-solid fa-file-lines transcript-icon"></i>
+        <span class="transcript-label">
+          <span class="transcript-title">Transcript</span>
+          <span class="transcript-subtitle">${turns.length} speaker turns</span>
+        </span>
+      </span>
+      <span class="transcript-chevron" aria-hidden="true">
+        <i class="fa-solid fa-chevron-down"></i>
+      </span>
+    `;
+    section.appendChild(toggle);
+
+    // Body
+    const body = document.createElement("div");
+    body.id = "transcript-body";
+    body.className = "transcript-body";
+    body.hidden = true;
+
+    // Toolbar
+    const toolbar = document.createElement("div");
+    toolbar.className = "transcript-toolbar";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "transcript-tool-btn";
+    copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
+    toolbar.appendChild(copyBtn);
+    body.appendChild(toolbar);
+
+    // Content
+    const content = document.createElement("div");
+    content.className = "transcript-content";
+
+    const dialogue = document.createElement("div");
+    dialogue.className = "transcript-dialogue";
+
+    for (const turn of turns) {
+      const colorClass = `speaker-color-${speakerMap.get(turn.speaker)}`;
+      const row = document.createElement("div");
+      row.className = `transcript-turn ${colorClass}`;
+
+      const meta = document.createElement("div");
+      meta.className = "turn-meta";
+      meta.innerHTML = `
+        <span class="turn-speaker">${escapeHtml(turn.speaker)}</span>
+        ${turn.timestamp ? `<span class="turn-ts">${escapeHtml(turn.timestamp)}</span>` : ""}
+      `;
+
+      const textWrap = document.createElement("div");
+      textWrap.className = "turn-text";
+      textWrap.textContent = turn.lines.join(" ");
+
+      row.appendChild(meta);
+      row.appendChild(textWrap);
+      dialogue.appendChild(row);
+    }
+
+    content.appendChild(dialogue);
+    body.appendChild(content);
+    section.appendChild(body);
+
+    // Copy button logic
+    copyBtn.addEventListener("click", async () => {
+      const plain = turns
+        .map((t) => `[${t.timestamp || ""}] ${t.speaker}: ${t.lines.join(" ")}`)
+        .join("\n\n");
+      try {
+        await navigator.clipboard.writeText(plain);
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
+        }, 2000);
+      } catch {}
+    });
+
+    // Toggle logic
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      body.hidden = open;
+    });
+
+    return section;
+  }
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // Run on first load and after Astro page transitions
+  initTranscript();
+  document.addEventListener("astro:after-swap", initTranscript);
+</script>
+
+<style is:global>
+  /* ── Transcript widget ─────────────────────────── */
+  .transcript-section {
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .transcript-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 24px;
+    background: var(--card-bg);
+    border: none;
+    cursor: pointer;
+    color: var(--steel-100);
+    transition: background 0.2s;
+    text-align: left;
+    font-family: var(--font-body);
+  }
+
+  .transcript-toggle:hover {
+    background: rgba(243, 139, 18, 0.06);
+  }
+
+  .transcript-toggle[aria-expanded="true"] {
+    border-bottom: 1px solid var(--card-border);
+  }
+
+  .transcript-toggle-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .transcript-icon {
+    font-size: 1.25rem;
+    color: var(--safety-500);
+    flex-shrink: 0;
+  }
+
+  .transcript-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .transcript-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--steel-100);
+  }
+
+  .transcript-subtitle {
+    font-size: 0.78rem;
+    color: var(--meta-text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .transcript-chevron {
+    color: var(--steel-500);
+    font-size: 0.85rem;
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+  }
+
+  .transcript-toggle[aria-expanded="true"] .transcript-chevron {
+    transform: rotate(180deg);
+  }
+
+  .transcript-body {
+    background: rgba(12, 14, 16, 0.5);
+  }
+
+  .transcript-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .transcript-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    background: transparent;
+    border: 1px solid rgba(243, 139, 18, 0.3);
+    border-radius: 999px;
+    color: var(--steel-500);
+    font-size: 0.78rem;
+    font-family: var(--font-body);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+
+  .transcript-tool-btn:hover {
+    border-color: var(--safety-500);
+    color: var(--safety-500);
+    background: rgba(243, 139, 18, 0.06);
+  }
+
+  .transcript-content {
+    padding: 20px 24px;
+    max-height: 560px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(243, 139, 18, 0.25) transparent;
+  }
+
+  .transcript-content::-webkit-scrollbar { width: 5px; }
+  .transcript-content::-webkit-scrollbar-track { background: transparent; }
+  .transcript-content::-webkit-scrollbar-thumb {
+    background: rgba(243, 139, 18, 0.25);
+    border-radius: 3px;
+  }
+
+  /* ── Dialogue rows ─────────────────────────────── */
+  .transcript-dialogue {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .transcript-turn {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 0 16px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s;
+  }
+
+  .transcript-turn:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  /* Alternate very subtle row tinting */
+  .transcript-turn:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+  }
+  .transcript-turn:nth-child(even):hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .turn-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 2px;
+  }
+
+  .turn-speaker {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .turn-ts {
+    font-size: 0.7rem;
+    color: var(--steel-500);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+
+  .turn-text {
+    color: var(--body-text);
+    font-size: 0.93rem;
+    line-height: 1.65;
+  }
+
+  /* ── Per-speaker accent colours ───────────────── */
+  .speaker-color-0 .turn-speaker { color: #f38b12; }   /* safety orange */
+  .speaker-color-1 .turn-speaker { color: #60a5fa; }   /* blue */
+  .speaker-color-2 .turn-speaker { color: #34d399; }   /* green */
+  .speaker-color-3 .turn-speaker { color: #f472b6; }   /* pink */
+  .speaker-color-4 .turn-speaker { color: #a78bfa; }   /* purple */
+  .speaker-color-5 .turn-speaker { color: #fb923c; }   /* amber */
+
+  @media (max-width: 560px) {
+    .transcript-turn {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+    .turn-meta {
+      flex-direction: row;
+      align-items: baseline;
+      gap: 8px;
+    }
+  }
+</style>

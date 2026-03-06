@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import AudioPlayer from "../components/AudioPlayer.astro";
+import TranscriptRenderer from "../components/TranscriptRenderer.astro";
 import { getCollection } from "astro:content";
 import { formatEpisodeDate } from "../lib/episodes";
 import { SITE } from "../lib/../config";
@@ -161,9 +162,12 @@ const jsonLd = {
     )}
     
     <AudioPlayer episode={episode} />
+
     <div class="detail-notes">
       <Content />
     </div>
+
+    <TranscriptRenderer />
   </article>
 </Base>
 
