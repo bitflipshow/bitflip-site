@@ -7,4 +7,8 @@ social:
   website: "https://www.ndls.ca/"
 ---
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+Stephen is an MSP owner with a background in enterprise IT, focused on simplifying complex tech solutions.
+
+A big believer in open-source, he believes the world could use a little less Microsoft and a little more Linux. You can ask him any question about Unifi gear and he will put you straight.
+
+Outside of tech, Stephen couldn’t live without music, coffee, and his expensive love for the car hobby. Friends don't let friends listen to music through bluetooth speakers.
