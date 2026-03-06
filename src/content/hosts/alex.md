@@ -1,7 +1,7 @@
 ---
 name: "Alex"
 role: "Co-host"
-avatar: "/images/hosts/alex.png"
+avatar: "/images/hosts/alex.jpg"
 order: 1
 social:
   github: "https://github.com/ironicbadger"
