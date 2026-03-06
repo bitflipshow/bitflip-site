@@ -43,13 +43,21 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
         ) : null;
       })()}
       {chapterItems.length > 0 && (
-        <div class="player-chapters">
-          {chapterItems.map((chapter: { time: string; title: string; seconds: number }) => (
-            <button class="chapter" type="button" data-seek={chapter.seconds}>
-              <span class="chapter-time">{chapter.time}</span>
-              <span>{chapter.title}</span>
-            </button>
-          ))}
+        <div class="player-chapters-wrap">
+          {chapterItems.length > 6 && (
+            <div class="chapters-hint">
+              <i class="fa-solid fa-list"></i>
+              {chapterItems.length} chapters
+            </div>
+          )}
+          <div class="player-chapters">
+            {chapterItems.map((chapter: { time: string; title: string; seconds: number }) => (
+              <button class="chapter" type="button" data-seek={chapter.seconds}>
+                <span class="chapter-time">{chapter.time}</span>
+                <span>{chapter.title}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -64,13 +72,52 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
   const playButton = root?.querySelector("[data-play]");
   const chapters = root?.querySelectorAll("[data-seek]") ?? [];
 
+  // The global audio element lives in the StickyPlayer
+  const getAudio = () => document.getElementById("global-audio");
+
+  // Returns true if the global audio is currently playing THIS episode
+  const isThisEpisodePlaying = () => {
+    const audio = getAudio();
+    return audio && !audio.paused && audio.src === root.dataset.src;
+  };
+
+  const syncButton = () => {
+    if (!playButton) return;
+    if (isThisEpisodePlaying()) {
+      playButton.textContent = "Pause";
+      playButton.setAttribute("aria-label", "Pause episode");
+    } else {
+      playButton.textContent = "Play";
+      playButton.setAttribute("aria-label", "Play episode");
+    }
+  };
+
+  // Sync on audio play/pause events
+  document.addEventListener("play", syncButton, true);
+  document.addEventListener("pause", syncButton, true);
+
+  // Also sync when a different episode starts playing
+  // (so this button reverts to "Play" if another episode is triggered)
+  window.addEventListener("bitflip:play", syncButton);
+
+  // Sync initial state in case the page loaded mid-playback
+  syncButton();
+
   playButton?.addEventListener("click", () => {
-    const detail = {
-      src: root.dataset.src,
-      title: root.dataset.title,
-      episodeNumber: Number(root.dataset.episode),
-    };
-    window.dispatchEvent(new CustomEvent("bitflip:play", { detail }));
+    const audio = getAudio();
+    if (isThisEpisodePlaying()) {
+      // This episode is playing — pause it
+      audio.pause();
+    } else {
+      // Either nothing is playing, or a different episode is — start this one
+      window.dispatchEvent(new CustomEvent("bitflip:play", {
+        detail: {
+          src: root.dataset.src,
+          title: root.dataset.title,
+          episodeNumber: Number(root.dataset.episode),
+        },
+      }));
+    }
   });
 
   chapters.forEach((button) => {
@@ -106,10 +153,49 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     color: var(--meta-text);
     font-size: 0.9rem;
   }
+
+  /* Chapters wrapper — handles scroll + fade hint */
+  .player-chapters-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .chapters-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--meta-text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
   .player-chapters {
     display: grid;
-    gap: 8px;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    /* Fade out at the bottom to hint at scrollability */
+    -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+    padding-right: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(243, 139, 18, 0.3) transparent;
   }
+
+  .player-chapters::-webkit-scrollbar {
+    width: 4px;
+  }
+  .player-chapters::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .player-chapters::-webkit-scrollbar-thumb {
+    background: rgba(243, 139, 18, 0.3);
+    border-radius: 2px;
+  }
+
   .chapter {
     display: flex;
     gap: 12px;
@@ -121,6 +207,8 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     padding: 8px 12px;
     text-align: left;
     cursor: pointer;
+    width: 100%;
+    flex-shrink: 0;
   }
   .chapter:hover {
     border-color: rgba(243, 139, 18, 0.5);
@@ -131,13 +219,10 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--safety-500);
+    white-space: nowrap;
+    flex-shrink: 0;
   }
-  @media (max-width: 720px) {
-    .player-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-  }
+
   .player-media {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -159,7 +244,12 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     display: block;
     border: none;
   }
+
   @media (max-width: 720px) {
+    .player-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
     .player-media {
       grid-template-columns: 1fr;
     }
