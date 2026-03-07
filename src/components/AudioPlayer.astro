@@ -30,7 +30,10 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
   {(chapterItems.length > 0 || youtubeUrl) && (
     <div class="player-media">
       {youtubeUrl && (() => {
-        const videoId = new URL(youtubeUrl).searchParams.get("v");
+        const ytUrl = new URL(youtubeUrl);
+        const videoId = ytUrl.hostname === "youtu.be"
+          ? ytUrl.pathname.slice(1)
+          : ytUrl.searchParams.get("v");
         return videoId ? (
           <div class="player-youtube">
             <iframe
@@ -123,9 +126,28 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
   chapters.forEach((button) => {
     button.addEventListener("click", () => {
       const seconds = Number(button.dataset.seek);
-      window.dispatchEvent(
-        new CustomEvent("bitflip:seek", { detail: { seconds } })
-      );
+      const audio = getAudio();
+
+        if (audio && audio.src === root.dataset.src) {
+          // Already the active episode — seek and ensure playing
+          window.dispatchEvent(new CustomEvent("bitflip:seek", { detail: { seconds } }));
+          audio.play();
+        } else {
+        // Different or no episode loaded — start it, then seek once audio is ready
+        window.dispatchEvent(new CustomEvent("bitflip:play", {
+          detail: {
+            src: root.dataset.src,
+            title: root.dataset.title,
+            episodeNumber: Number(root.dataset.episode),
+          },
+        }));
+        const targetAudio = getAudio();
+        const onCanPlay = () => {
+          targetAudio.removeEventListener("canplay", onCanPlay);
+          window.dispatchEvent(new CustomEvent("bitflip:seek", { detail: { seconds } }));
+        };
+        targetAudio?.addEventListener("canplay", onCanPlay);
+      }
     });
   });
 </script>

@@ -5,6 +5,8 @@ const chaptersSchema = z
     z.object({
       time: z.string(),
       title: z.string(),
+      img: z.string().url().optional(),
+      url: z.string().url().optional(),
     })
   )
   .optional();
