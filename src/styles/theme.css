@@ -2,6 +2,7 @@
 
 :root {
   color-scheme: dark;
+  --sticky-player-offset: 132px;
   --ink-900: #0c0e10;
   --ink-800: #14171c;
   --ink-700: #1c2229;
@@ -60,7 +61,7 @@ img {
 }
 
 .container {
-  width: min(1100px, 92vw);
+  width: min(1100px, calc(100vw - 32px));
   margin: 0 auto;
 }
 
@@ -116,7 +117,7 @@ img {
 }
 
 main {
-  padding: 24px 0 120px;
+  padding: 24px 0 calc(var(--sticky-player-offset) + env(safe-area-inset-bottom, 0px));
 }
 
 .card {
@@ -206,22 +207,39 @@ main {
 }
 
 @media (max-width: 768px) {
+  :root {
+    --sticky-player-offset: 148px;
+  }
+
+  .container {
+    width: min(1100px, calc(100vw - 24px));
+  }
+
   .site-header {
+    padding: 18px 0 10px;
     flex-wrap: wrap;
     gap: 12px;
   }
 
   .brand {
     flex: 1;
+    min-width: 0;
+    gap: 12px;
   }
 
   .brand-logo {
-    width: 80px;
-    height: 80px;
+    width: 68px;
+    height: 68px;
+  }
+
+  .site-tagline {
+    font-size: 0.82rem;
+    margin-top: 4px;
   }
 
   .nav-toggle {
     display: block;
+    padding: 10px 12px;
   }
 
   .nav-links {
@@ -244,7 +262,7 @@ main {
   }
 
   .nav-links a {
-    padding: 14px 20px;
+    padding: 14px 16px;
     border-bottom: 1px solid rgba(255,255,255,0.06);
     font-size: 0.9rem;
   }
@@ -258,9 +276,22 @@ main {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 520px) {
+  :root {
+    --sticky-player-offset: 124px;
+  }
+
+  .site-title {
+    font-size: 1.15rem;
+    letter-spacing: 0.06em;
+  }
+
+  .site-tagline {
+    display: none;
+  }
+
   main {
-    padding: 24px 0 200px;
+    padding-top: 18px;
   }
 }
 
@@ -269,21 +300,8 @@ main {
     width: 60px;
     height: 60px;
   }
-  
+
   .site-title {
-    font-size: 1.2rem;
-  }
-  
-  .site-tagline {
-    font-size: 0.8rem;
-  }
-  
-  .nav-links {
-    gap: 12px;
-    font-size: 0.8rem;
-  }
-  
-  main {
-    padding: 24px 0 220px;
+    font-size: 1.1rem;
   }
 }
