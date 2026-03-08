@@ -68,9 +68,10 @@
     transcriptHeading.remove();
     for (const el of transcriptNodes) el.remove();
 
-    // Build the widget and append it after .detail-notes
+    // Build the widget and append it after the notes/sidebar block when present
     const widget = buildWidget(cues);
-    notes.insertAdjacentElement("afterend", widget);
+    const insertionTarget = notes.closest(".detail-content") || notes;
+    insertionTarget.insertAdjacentElement("afterend", widget);
   }
 
   function buildWidget(cues) {
@@ -242,6 +243,7 @@
     display: flex;
     align-items: center;
     gap: 14px;
+    min-width: 0;
   }
 
   .transcript-icon {
@@ -254,6 +256,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
   }
 
   .transcript-title {
@@ -397,9 +400,24 @@
   .speaker-color-5 .turn-speaker { color: #fb923c; }   /* amber */
 
   @media (max-width: 560px) {
+    .transcript-toggle {
+      padding: 16px;
+      align-items: flex-start;
+    }
+
+    .transcript-toolbar {
+      padding: 10px 14px;
+    }
+
+    .transcript-content {
+      padding: 16px 14px;
+      max-height: 60vh;
+    }
+
     .transcript-turn {
       grid-template-columns: 1fr;
       gap: 4px;
+      padding: 10px 0;
     }
     .turn-meta {
       flex-direction: row;

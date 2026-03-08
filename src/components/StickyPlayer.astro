@@ -179,12 +179,13 @@
     right: 0;
     background: rgba(10, 12, 14, 0.96);
     border-top: 1px solid rgba(243, 139, 18, 0.3);
-    padding: 14px 20px;
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     gap: 16px;
     align-items: center;
     backdrop-filter: blur(10px);
+    z-index: 30;
   }
   .sticky-info {
     display: grid;
@@ -193,6 +194,7 @@
   .sticky-title {
     font-weight: 600;
     font-size: 0.95rem;
+    line-height: 1.25;
   }
   .sticky-controls {
     display: flex;
@@ -222,11 +224,51 @@
   }
   @media (max-width: 900px) {
     .sticky-player {
-      grid-template-columns: 1fr;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "info info"
+        "controls progress";
       text-align: left;
+      gap: 10px 12px;
+    }
+    .sticky-info {
+      grid-area: info;
     }
     .sticky-controls {
+      grid-area: controls;
       justify-content: flex-start;
+    }
+    .sticky-progress {
+      grid-area: progress;
+      min-width: 0;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .sticky-player {
+      padding: 10px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .sticky-title {
+      font-size: 0.82rem;
+    }
+
+    .sticky-controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    .sticky-button {
+      width: auto;
+      padding: 7px 9px;
+      font-size: 0.68rem;
+      text-align: center;
+    }
+
+    .sticky-progress {
+      grid-template-columns: 34px 1fr 34px;
+      gap: 4px;
+      font-size: 0.68rem;
     }
   }
 </style>

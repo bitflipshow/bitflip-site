@@ -4,7 +4,8 @@ import AudioPlayer from "../../components/AudioPlayer.astro";
 import TranscriptRenderer from "../../components/TranscriptRenderer.astro";
 import { getCollection } from "astro:content";
 import { formatEpisodeDate } from "../../lib/episodes";
-import { SITE } from "../lib/../../config";
+import { resolveGuestAvatarSrc } from "../../lib/guest-avatars";
+import { SITE } from "../../config";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -27,6 +28,18 @@ const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors, youtubeUrl } = episode.data;
 const formattedDate = formatEpisodeDate(date);
+const guestsWithAvatarSrc = guests
+  ? await Promise.all(
+      guests.map(async (guest) => ({
+        ...guest,
+        avatarSrc: await resolveGuestAvatarSrc(guest.avatar),
+      }))
+    )
+  : [];
+const sponsorsWithHref = (sponsors ?? []).map((sponsor) => ({
+  ...sponsor,
+  href: sponsor.url ?? sponsor.link,
+}));
 
 const siteUrl = SITE.url;
 const jsonLd = {
@@ -63,36 +76,59 @@ const jsonLd = {
 
   <article class="episode-detail">
     <div class="detail-hero">
-      <div class="detail-cover">
-        <img src={coverImage} alt={`${title} cover art`} />
-      </div>
-      <div>
+      <div class="detail-intro">
         <div class="section-title">Episode #{episodeNumber}</div>
         <h1 class="detail-title">{title}</h1>
         <div class="detail-date">{formattedDate}</div>
-        <p class="detail-summary">{summary}</p>
-        {tags && tags.length > 0 && (
-          <div class="detail-tags">
-            {tags.map((tag: string) => (
-              <a href={`/tags/${tag}`} class="tag">#{tag}</a>
+      </div>
+      <p class="detail-summary">{summary}</p>
+      {tags && tags.length > 0 && (
+        <div class="detail-tags">
+          {tags.map((tag: string) => (
+            <a href={`/tags/${tag}`} class="tag">#{tag}</a>
+          ))}
+        </div>
+      )}
+      {(episode.data.audioUrl || youtubeUrl) && (
+        <div class="download-section">
+          {episode.data.audioUrl && (
+            <a href={episode.data.audioUrl} download class="download-link">
+              <i class="fa-solid fa-download"></i> Download MP3
+            </a>
+          )}
+          {youtubeUrl && (
+            <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" class="download-link youtube-link">
+              <i class="fa-brands fa-youtube"></i> Watch on YouTube
+            </a>
+          )}
+        </div>
+      )}
+      {sponsorsWithHref.length > 0 && (
+        <aside class="sponsors-section detail-sponsors">
+          <div class="section-title">Sponsors</div>
+          <div class="sponsors-grid">
+            {sponsorsWithHref.map((sponsor) => (
+              <div class="sponsor-card" >
+                <div class="sponsor-header">
+                  {sponsor.href ? (
+                    <a href={sponsor.href} target="_blank" rel="noopener noreferrer" class="sponsor-name sponsor-name-link">
+                      {sponsor.name}
+                    </a>
+                  ) : (
+                    <span class="sponsor-name">{sponsor.name}</span>
+                  )}
+                  {sponsor.href && (
+                    <a href={sponsor.href} target="_blank" rel="noopener noreferrer" class="sponsor-link">
+                      Visit <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </a>
+                  )}
+                </div>
+                {sponsor.blurb && <p class="sponsor-blurb">{sponsor.blurb}</p>}
+              </div>
             ))}
           </div>
-        )}
-        {(episode.data.audioUrl || youtubeUrl) && (
-          <div class="download-section">
-            {episode.data.audioUrl && (
-              <a href={episode.data.audioUrl} download class="download-link">
-                <i class="fa-solid fa-download"></i> Download MP3
-              </a>
-            )}
-            {youtubeUrl && (
-              <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" class="download-link youtube-link">
-                <i class="fa-brands fa-youtube"></i> Watch on YouTube
-              </a>
-            )}
-          </div>
-        )}
-      </div>
+        </aside>
+      )}
     </div>
 
     {(hosts && hosts.length > 0) || (guests && guests.length > 0) ? (
@@ -112,23 +148,23 @@ const jsonLd = {
             </div>
           </div>
         )}
-        {guests && guests.length > 0 && (
+        {guestsWithAvatarSrc.length > 0 && (
           <div class="people-group">
             <div class="section-title">Guests</div>
             <div class="people-grid">
-              {guests.map((guest) => (
+              {guestsWithAvatarSrc.map((guest) => (
                 guest.link ? (
                   <a href={guest.link} target="_blank" rel="noopener noreferrer" class="person-chip" >
-                    {guest.avatar && (
-                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    {guest.avatarSrc && (
+                      <img src={guest.avatarSrc} alt={guest.name} class="person-chip-avatar" />
                     )}
                     <span class="person-chip-name">{guest.name}</span>
                     <i class="fa-solid fa-arrow-up-right-from-square person-chip-link-icon"></i>
                   </a>
                 ) : (
                   <div class="person-chip" >
-                    {guest.avatar && (
-                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    {guest.avatarSrc && (
+                      <img src={guest.avatarSrc} alt={guest.name} class="person-chip-avatar" />
                     )}
                     <span class="person-chip-name">{guest.name}</span>
                   </div>
@@ -140,27 +176,6 @@ const jsonLd = {
       </div>
     ) : null}
 
-    {sponsors && sponsors.length > 0 && (
-      <div class="sponsors-section">
-        <div class="section-title">Sponsors</div>
-        <div class="sponsors-grid">
-          {sponsors.map((sponsor) => (
-            <div class="sponsor-card" >
-              <div class="sponsor-header">
-                <span class="sponsor-name">{sponsor.name}</span>
-                {sponsor.url && (
-                  <a href={sponsor.url} target="_blank" rel="noopener noreferrer" class="sponsor-link">
-                    Visit <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                  </a>
-                )}
-              </div>
-              {sponsor.blurb && <p class="sponsor-blurb">{sponsor.blurb}</p>}
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-    
     <AudioPlayer episode={episode} />
 
     <div class="detail-notes">
@@ -176,26 +191,30 @@ const jsonLd = {
     display: grid;
     gap: 32px;
   }
+  .episode-detail > * {
+    min-width: 0;
+  }
   .detail-hero {
     display: grid;
-    gap: 24px;
-    grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
-    align-items: center;
+    gap: 18px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "intro"
+      "summary"
+      "tags"
+      "actions"
+      "sponsors";
+    align-items: start;
   }
-  .detail-cover {
-    background: linear-gradient(160deg, var(--ink-800), var(--ink-700));
-    border-radius: var(--radius-md);
-    padding: 16px;
-    border: 1px solid rgba(243, 139, 18, 0.2);
-  }
-  .detail-cover img {
-    width: 100%;
-    border-radius: 10px;
+  .detail-intro {
+    grid-area: intro;
+    min-width: 0;
   }
   .detail-title {
     font-family: var(--font-display);
     font-size: clamp(2rem, 4vw, 3rem);
     margin: 0 0 12px;
+    line-height: 1.05;
   }
   .detail-date {
     color: var(--meta-text);
@@ -204,14 +223,18 @@ const jsonLd = {
     font-size: 0.8rem;
   }
   .detail-summary {
+    grid-area: summary;
     color: var(--body-text);
     max-width: 640px;
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.75;
   }
   .detail-tags {
+    grid-area: tags;
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin-top: 12px;
   }
   .tag {
     border: 1px solid rgba(243, 139, 18, 0.4);
@@ -229,10 +252,14 @@ const jsonLd = {
     transform: translateY(-1px);
   }
   .download-section {
-    margin-top: 16px;
+    grid-area: actions;
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+  }
+  .detail-sponsors {
+    grid-area: sponsors;
+    min-width: 0;
   }
 
   .youtube-link {
@@ -247,6 +274,7 @@ const jsonLd = {
   .download-link {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     padding: 11px 22px;
     background: transparent;
@@ -291,6 +319,7 @@ const jsonLd = {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
     padding: 8px 14px;
     background: rgba(243, 139, 18, 0.08);
     border: 1px solid rgba(243, 139, 18, 0.25);
@@ -315,6 +344,7 @@ const jsonLd = {
   .person-chip-name {
     font-weight: 600;
     font-size: 0.9rem;
+    overflow-wrap: anywhere;
   }
   .person-chip-link-icon {
     font-size: 0.7rem;
@@ -332,7 +362,7 @@ const jsonLd = {
   .sponsors-grid {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: 1fr;
   }
   .sponsor-card {
     background: rgba(243, 139, 18, 0.05);
@@ -347,12 +377,26 @@ const jsonLd = {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex-wrap: wrap;
   }
   .sponsor-name {
     font-family: var(--font-display);
     font-weight: 700;
     font-size: 1rem;
     color: var(--steel-100);
+  }
+  .sponsor-name-link {
+    color: var(--safety-400);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 183, 72, 0.95);
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 2px;
+    font-weight: 800;
+    transition: color 0.2s ease, text-decoration-color 0.2s ease;
+  }
+  .sponsor-name-link:hover {
+    color: #ffd28a;
+    text-decoration-color: #ffd28a;
   }
   .sponsor-link {
     display: inline-flex;
@@ -383,15 +427,159 @@ const jsonLd = {
   .detail-notes {
     color: var(--body-text);
     line-height: 1.7;
+    background: rgba(12, 14, 16, 0.45);
+    border: 1px solid rgba(243, 139, 18, 0.12);
+    border-radius: var(--radius-md);
+    padding: 24px;
+  }
+
+  .detail-notes :where(h2, h3, h4) {
+    color: var(--steel-100);
+    font-family: var(--font-display);
+    line-height: 1.2;
+  }
+
+  .detail-notes :where(p, li) {
+    overflow-wrap: anywhere;
+  }
+
+  .detail-notes :where(ul, ol) {
+    padding-left: 1.2rem;
+  }
+
+  .detail-notes :where(a) {
+    color: var(--safety-400);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 183, 72, 0.95);
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 2px;
+    font-weight: 600;
+  }
+
+  :global(.detail-notes a) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .detail-notes :where(a:hover) {
+    color: #ffd28a;
+    text-decoration-color: #ffd28a;
+  }
+
+  .detail-notes :where(pre) {
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .detail-notes :where(code) {
+    overflow-wrap: anywhere;
+  }
+
+  .detail-notes :where(img, iframe, video) {
+    max-width: 100%;
+    border-radius: var(--radius-sm);
   }
 
   @media (max-width: 860px) {
     .detail-hero {
-      grid-template-columns: 1fr;
+      gap: 16px;
     }
     .people-section {
       flex-direction: column;
       gap: 20px;
+    }
+    .detail-title {
+      font-size: clamp(1.5rem, 7vw, 2.2rem);
+      margin-bottom: 8px;
+    }
+    .detail-summary {
+      max-width: none;
+      font-size: 0.98rem;
+      line-height: 1.65;
+    }
+    .download-section {
+      width: 100%;
+    }
+    .download-link {
+      flex: 1 1 220px;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .episode-detail {
+      gap: 24px;
+    }
+    .detail-hero {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "intro"
+        "summary"
+        "actions"
+        "tags"
+        "sponsors";
+      gap: 12px;
+    }
+    .detail-intro {
+      display: grid;
+      gap: 6px;
+    }
+    .detail-title {
+      font-size: clamp(1.7rem, 9vw, 2.1rem);
+      margin-bottom: 0;
+    }
+    .detail-date {
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+    }
+    .tag {
+      padding: 5px 9px;
+      font-size: 0.7rem;
+    }
+    .download-section {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .download-link {
+      width: auto;
+      padding: 12px 16px;
+      font-size: 0.78rem;
+      justify-content: flex-start;
+      border-radius: 16px;
+    }
+    .people-section,
+    .sponsors-section,
+    .detail-notes {
+      padding: 18px;
+    }
+    .people-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+    .person-chip {
+      width: 100%;
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+    }
+    .sponsor-card {
+      padding: 14px;
+    }
+  }
+
+  @media (min-width: 1080px) {
+    .detail-hero {
+      grid-template-columns: minmax(0, 1fr) 320px;
+      grid-template-areas:
+        "intro sponsors"
+        "summary sponsors"
+        "tags sponsors"
+        "actions sponsors";
+    }
+    .detail-sponsors {
+      position: sticky;
+      top: 96px;
     }
   }
 </style>
