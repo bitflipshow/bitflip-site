@@ -48,6 +48,7 @@ const episodes = defineCollection({
         z.object({
           name: z.string(),
           url: z.string().url().optional(),
+          link: z.string().url().optional(),
           blurb: z.string().optional(),
         })
       )

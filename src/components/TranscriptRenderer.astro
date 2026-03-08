@@ -68,9 +68,10 @@
     transcriptHeading.remove();
     for (const el of transcriptNodes) el.remove();
 
-    // Build the widget and append it after .detail-notes
+    // Build the widget and append it after the notes/sidebar block when present
     const widget = buildWidget(cues);
-    notes.insertAdjacentElement("afterend", widget);
+    const insertionTarget = notes.closest(".detail-content") || notes;
+    insertionTarget.insertAdjacentElement("afterend", widget);
   }
 
   function buildWidget(cues) {

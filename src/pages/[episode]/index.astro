@@ -4,7 +4,8 @@ import AudioPlayer from "../../components/AudioPlayer.astro";
 import TranscriptRenderer from "../../components/TranscriptRenderer.astro";
 import { getCollection } from "astro:content";
 import { formatEpisodeDate } from "../../lib/episodes";
-import { SITE } from "../lib/../../config";
+import { resolveGuestAvatarSrc } from "../../lib/guest-avatars";
+import { SITE } from "../../config";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -27,6 +28,18 @@ const { episode, hosts } = Astro.props;
 const { Content } = await episode.render();
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors, youtubeUrl } = episode.data;
 const formattedDate = formatEpisodeDate(date);
+const guestsWithAvatarSrc = guests
+  ? await Promise.all(
+      guests.map(async (guest) => ({
+        ...guest,
+        avatarSrc: await resolveGuestAvatarSrc(guest.avatar),
+      }))
+    )
+  : [];
+const sponsorsWithHref = (sponsors ?? []).map((sponsor) => ({
+  ...sponsor,
+  href: sponsor.url ?? sponsor.link,
+}));
 
 const siteUrl = SITE.url;
 const jsonLd = {
@@ -90,6 +103,32 @@ const jsonLd = {
           )}
         </div>
       )}
+      {sponsorsWithHref.length > 0 && (
+        <aside class="sponsors-section detail-sponsors">
+          <div class="section-title">Sponsors</div>
+          <div class="sponsors-grid">
+            {sponsorsWithHref.map((sponsor) => (
+              <div class="sponsor-card" >
+                <div class="sponsor-header">
+                  {sponsor.href ? (
+                    <a href={sponsor.href} target="_blank" rel="noopener noreferrer" class="sponsor-name sponsor-name-link">
+                      {sponsor.name}
+                    </a>
+                  ) : (
+                    <span class="sponsor-name">{sponsor.name}</span>
+                  )}
+                  {sponsor.href && (
+                    <a href={sponsor.href} target="_blank" rel="noopener noreferrer" class="sponsor-link">
+                      Visit <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </a>
+                  )}
+                </div>
+                {sponsor.blurb && <p class="sponsor-blurb">{sponsor.blurb}</p>}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
     </div>
 
     {(hosts && hosts.length > 0) || (guests && guests.length > 0) ? (
@@ -109,23 +148,23 @@ const jsonLd = {
             </div>
           </div>
         )}
-        {guests && guests.length > 0 && (
+        {guestsWithAvatarSrc.length > 0 && (
           <div class="people-group">
             <div class="section-title">Guests</div>
             <div class="people-grid">
-              {guests.map((guest) => (
+              {guestsWithAvatarSrc.map((guest) => (
                 guest.link ? (
                   <a href={guest.link} target="_blank" rel="noopener noreferrer" class="person-chip" >
-                    {guest.avatar && (
-                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    {guest.avatarSrc && (
+                      <img src={guest.avatarSrc} alt={guest.name} class="person-chip-avatar" />
                     )}
                     <span class="person-chip-name">{guest.name}</span>
                     <i class="fa-solid fa-arrow-up-right-from-square person-chip-link-icon"></i>
                   </a>
                 ) : (
                   <div class="person-chip" >
-                    {guest.avatar && (
-                      <img src={`/images/guests/${guest.avatar}`} alt={guest.name} class="person-chip-avatar" />
+                    {guest.avatarSrc && (
+                      <img src={guest.avatarSrc} alt={guest.name} class="person-chip-avatar" />
                     )}
                     <span class="person-chip-name">{guest.name}</span>
                   </div>
@@ -137,27 +176,6 @@ const jsonLd = {
       </div>
     ) : null}
 
-    {sponsors && sponsors.length > 0 && (
-      <div class="sponsors-section">
-        <div class="section-title">Sponsors</div>
-        <div class="sponsors-grid">
-          {sponsors.map((sponsor) => (
-            <div class="sponsor-card" >
-              <div class="sponsor-header">
-                <span class="sponsor-name">{sponsor.name}</span>
-                {sponsor.url && (
-                  <a href={sponsor.url} target="_blank" rel="noopener noreferrer" class="sponsor-link">
-                    Visit <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                  </a>
-                )}
-              </div>
-              {sponsor.blurb && <p class="sponsor-blurb">{sponsor.blurb}</p>}
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-    
     <AudioPlayer episode={episode} />
 
     <div class="detail-notes">
@@ -184,7 +202,8 @@ const jsonLd = {
       "intro"
       "summary"
       "tags"
-      "actions";
+      "actions"
+      "sponsors";
     align-items: start;
   }
   .detail-intro {
@@ -237,6 +256,10 @@ const jsonLd = {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+  }
+  .detail-sponsors {
+    grid-area: sponsors;
+    min-width: 0;
   }
 
   .youtube-link {
@@ -339,7 +362,7 @@ const jsonLd = {
   .sponsors-grid {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    grid-template-columns: 1fr;
   }
   .sponsor-card {
     background: rgba(243, 139, 18, 0.05);
@@ -361,6 +384,19 @@ const jsonLd = {
     font-weight: 700;
     font-size: 1rem;
     color: var(--steel-100);
+  }
+  .sponsor-name-link {
+    color: var(--safety-400);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 183, 72, 0.95);
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 2px;
+    font-weight: 800;
+    transition: color 0.2s ease, text-decoration-color 0.2s ease;
+  }
+  .sponsor-name-link:hover {
+    color: #ffd28a;
+    text-decoration-color: #ffd28a;
   }
   .sponsor-link {
     display: inline-flex;
@@ -412,16 +448,21 @@ const jsonLd = {
   }
 
   .detail-notes :where(a) {
-    color: var(--safety-500);
+    color: var(--safety-400);
     text-decoration: underline;
-    text-underline-offset: 0.15em;
+    text-decoration-color: rgba(255, 183, 72, 0.95);
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 2px;
+    font-weight: 600;
   }
 
   :global(.detail-notes a) {
-    display: block;
-    width: 100%;
     overflow-wrap: anywhere;
-    word-break: break-all;
+    word-break: break-word;
+  }
+  .detail-notes :where(a:hover) {
+    color: #ffd28a;
+    text-decoration-color: #ffd28a;
   }
 
   .detail-notes :where(pre) {
@@ -477,7 +518,8 @@ const jsonLd = {
         "intro"
         "summary"
         "actions"
-        "tags";
+        "tags"
+        "sponsors";
       gap: 12px;
     }
     .detail-intro {
@@ -523,6 +565,21 @@ const jsonLd = {
     }
     .sponsor-card {
       padding: 14px;
+    }
+  }
+
+  @media (min-width: 1080px) {
+    .detail-hero {
+      grid-template-columns: minmax(0, 1fr) 320px;
+      grid-template-areas:
+        "intro sponsors"
+        "summary sponsors"
+        "tags sponsors"
+        "actions sponsors";
+    }
+    .detail-sponsors {
+      position: sticky;
+      top: 96px;
     }
   }
 </style>
