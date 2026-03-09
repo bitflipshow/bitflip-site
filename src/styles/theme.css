@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap");
 
 :root {
   color-scheme: dark;
@@ -9,6 +9,7 @@
   --steel-100: #f1f2f3;
   --steel-300: #c9d0d6;
   --steel-500: #8b96a3;
+  --safety-400: #ffb748;
   --safety-500: #f38b12;
   --safety-600: #d8740f;
   --safety-700: #b7620c;
@@ -25,8 +26,8 @@
   --transition-color: color 0.2s;
   --body-text: var(--steel-300);
   --meta-text: var(--steel-500);
-  --font-display: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-display: "Fira Code", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-body: "Fira Code", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 * {
@@ -47,7 +48,7 @@ body {
     radial-gradient(1200px 600px at 15% 20%, rgba(243, 139, 18, 0.08), transparent 60%),
     radial-gradient(800px 500px at 85% 10%, rgba(243, 139, 18, 0.06), transparent 60%),
     linear-gradient(160deg, var(--ink-900), var(--ink-800));
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 a {
