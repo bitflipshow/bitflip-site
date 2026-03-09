@@ -447,22 +447,33 @@ const jsonLd = {
     padding-left: 1.2rem;
   }
 
-  .detail-notes :where(a) {
-    color: var(--safety-400);
-    text-decoration: underline;
-    text-decoration-color: rgba(255, 183, 72, 0.95);
-    text-underline-offset: 0.2em;
-    text-decoration-thickness: 2px;
-    font-weight: 600;
-  }
-
   :global(.detail-notes a) {
+    color: var(--safety-400) !important;
     overflow-wrap: anywhere;
     word-break: break-word;
+    text-decoration: underline;
+    text-decoration-color: currentColor;
+    text-underline-offset: 0.18em;
+    text-decoration-thickness: 1.5px;
+    font-weight: inherit;
+    transition:
+      color 0.2s ease,
+      text-decoration-color 0.2s ease;
   }
-  .detail-notes :where(a:hover) {
-    color: #ffd28a;
-    text-decoration-color: #ffd28a;
+
+  :global(.detail-notes a:visited) {
+    color: #f0a84b !important;
+  }
+
+  :global(.detail-notes a:hover),
+  :global(.detail-notes a:focus-visible) {
+    color: #ffd08a !important;
+    text-decoration-color: currentColor;
+  }
+
+  :global(.detail-notes a:focus-visible) {
+    outline: 2px solid rgba(255, 183, 72, 0.9);
+    outline-offset: 3px;
   }
 
   .detail-notes :where(pre) {
