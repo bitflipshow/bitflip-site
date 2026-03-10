@@ -23,6 +23,39 @@ import { SOCIAL } from "../config";
       </div>
 
       <div class="subscribe-card">
+        <div class="subscribe-icon spotify">
+          <i class="fa-brands fa-spotify"></i>
+        </div>
+        <h2>Spotify</h2>
+        <p>Listen and subscribe on Spotify.</p>
+        <a href={SOCIAL.spotify} target="_blank" rel="noopener noreferrer" class="subscribe-button spotify">
+          <i class="fa-brands fa-spotify"></i> Listen on Spotify
+        </a>
+      </div>
+
+      <div class="subscribe-card">
+        <div class="subscribe-icon podcastindex">
+          <i class="fa-solid fa-podcast"></i>
+        </div>
+        <h2>Podcast Index</h2>
+        <p>Find us on the Podcast Index — the open podcast database.</p>
+        <a href={SOCIAL.podcastIndex} target="_blank" rel="noopener noreferrer" class="subscribe-button podcastindex">
+          <i class="fa-solid fa-podcast"></i> Podcast Index
+        </a>
+      </div>
+
+      <div class="subscribe-card">
+        <div class="subscribe-icon applepodcasts">
+          <i class="fa-brands fa-apple"></i>
+        </div>
+        <h2>Apple Podcasts</h2>
+        <p>Subscribe on Apple Podcasts.</p>
+        <a href={SOCIAL.applePodcasts} target="_blank" rel="noopener noreferrer" class="subscribe-button applepodcasts">
+          <i class="fa-brands fa-apple"></i> Apple Podcasts
+        </a>
+      </div>
+
+      <div class="subscribe-card">
         <div class="subscribe-icon youtube">
           <i class="fa-brands fa-youtube"></i>
         </div>
@@ -50,7 +83,7 @@ import { SOCIAL } from "../config";
 
   .subscribe-options {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 24px;
   }
 
@@ -89,14 +122,9 @@ import { SOCIAL } from "../config";
     color: #ff0000;
   }
 
-  .subscribe-icon.github {
-    background: rgba(255, 255, 255, 0.1);
-    color: #ffffff;
-  }
-
-  .subscribe-icon.mastodon {
-    background: rgba(99, 100, 255, 0.1);
-    color: #6364ff;
+  .subscribe-icon.spotify {
+    background: rgba(30, 215, 96, 0.1);
+    color: #1ed760;
   }
 
   .subscribe-card h2 {
@@ -143,24 +171,50 @@ import { SOCIAL } from "../config";
     color: white;
   }
 
-  .subscribe-button.github {
-    border-color: #ffffff;
-    color: #ffffff;
+  .subscribe-button.spotify {
+    border-color: #1ed760;
+    color: #1ed760;
   }
 
-  .subscribe-button.github:hover {
-    background: #ffffff;
-    color: var(--ink-900);
+  .subscribe-button.spotify:hover {
+    background: #1ed760;
+    color: #000;
   }
 
-  .subscribe-button.mastodon {
-    border-color: #6364ff;
-    color: #6364ff;
+  .subscribe-icon.podcastindex {
+    background: rgba(247, 130, 0, 0.1);
+    color: #f78200;
   }
 
-  .subscribe-button.mastodon:hover {
-    background: #6364ff;
-    color: white;
+  .subscribe-button.podcastindex {
+    border-color: #f78200;
+    color: #f78200;
+  }
+
+  .subscribe-button.podcastindex:hover {
+    background: #f78200;
+    color: #000;
+  }
+
+  .subscribe-icon.applepodcasts {
+    background: rgba(177, 80, 226, 0.1);
+    color: #b150e2;
+  }
+
+  .subscribe-button.applepodcasts {
+    border-color: #b150e2;
+    color: #b150e2;
+  }
+
+  .subscribe-button.applepodcasts:hover {
+    background: #b150e2;
+    color: #fff;
+  }
+
+  @media (max-width: 900px) {
+    .subscribe-options {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   @media (max-width: 768px) {
