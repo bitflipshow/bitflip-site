@@ -56,6 +56,17 @@ import { SOCIAL } from "../config";
       </div>
 
       <div class="subscribe-card">
+        <div class="subscribe-icon pocketcasts">
+          <i class="fa-solid fa-headphones"></i>
+        </div>
+        <h2>Pocket Casts</h2>
+        <p>Subscribe on Pocket Casts.</p>
+        <a href={SOCIAL.pocketCasts} target="_blank" rel="noopener noreferrer" class="subscribe-button pocketcasts">
+          <i class="fa-solid fa-headphones"></i> Pocket Casts
+        </a>
+      </div>
+
+      <div class="subscribe-card">
         <div class="subscribe-icon youtube">
           <i class="fa-brands fa-youtube"></i>
         </div>
@@ -91,7 +102,7 @@ import { SOCIAL } from "../config";
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     border-radius: var(--radius-md);
-    padding: 32px 24px;
+    padding: 20px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -105,15 +116,15 @@ import { SOCIAL } from "../config";
   }
 
   .subscribe-icon {
-    width: 80px;
-    height: 80px;
+    width: 52px;
+    height: 52px;
     border-radius: 50%;
     background: rgba(243, 139, 18, 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 20px;
-    font-size: 2rem;
+    margin-bottom: 12px;
+    font-size: 1.3rem;
     color: var(--safety-500);
   }
 
@@ -128,14 +139,15 @@ import { SOCIAL } from "../config";
   }
 
   .subscribe-card h2 {
-    font-size: 1.5rem;
-    margin-bottom: 12px;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
     color: var(--steel-100);
   }
 
   .subscribe-card p {
     color: var(--body-text);
-    margin-bottom: 24px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
     flex-grow: 1;
   }
 
@@ -143,7 +155,7 @@ import { SOCIAL } from "../config";
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 11px 22px;
+    padding: 7px 16px;
     background: transparent;
     border: 1px solid var(--safety-500);
     color: var(--safety-500);
@@ -152,7 +164,7 @@ import { SOCIAL } from "../config";
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.875rem;
+    font-size: 0.78rem;
     transition: background 0.2s, color 0.2s;
   }
 
@@ -211,7 +223,22 @@ import { SOCIAL } from "../config";
     color: #fff;
   }
 
-  @media (max-width: 900px) {
+  .subscribe-icon.pocketcasts {
+    background: rgba(244, 62, 55, 0.1);
+    color: #f43e37;
+  }
+
+  .subscribe-button.pocketcasts {
+    border-color: #f43e37;
+    color: #f43e37;
+  }
+
+  .subscribe-button.pocketcasts:hover {
+    background: #f43e37;
+    color: #fff;
+  }
+
+  @media (max-width: 1000px) {
     .subscribe-options {
       grid-template-columns: repeat(2, 1fr);
     }

@@ -16,4 +16,5 @@ export const SOCIAL = {
   spotify: "https://open.spotify.com/show/7F90CT5b5Atz6teBowZXWX",
   podcastIndex: "https://podcastindex.org/podcast/7734731",
   applePodcasts: "https://podcasts.apple.com/us/podcast/bitflip-show/id1882773674",
+  pocketCasts: "https://pca.st/hw7ez99r",
 };

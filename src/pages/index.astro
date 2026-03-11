@@ -39,6 +39,10 @@ const recentEpisodes = episodes.slice(0, 4);
               <i class="fa-brands fa-apple"></i>
               <span>Apple Podcasts</span>
             </a>
+            <a href={SOCIAL.pocketCasts} target="_blank" rel="noopener noreferrer" class="link-button pocketcasts">
+              <i class="fa-solid fa-headphones"></i>
+              <span>Pocket Casts</span>
+            </a>
             <a href={SOCIAL.youtube} target="_blank" rel="noopener noreferrer" class="link-button youtube">
               <i class="fa-brands fa-youtube"></i>
               <span>YouTube</span>
@@ -170,6 +174,7 @@ const recentEpisodes = episodes.slice(0, 4);
   .link-button.mastodon:hover    { color: #6364ff;            border-color: #6364ff; }
   .link-button.podcastindex:hover  { color: #f78200; border-color: #f78200; }
   .link-button.applepodcasts:hover { color: #b150e2; border-color: #b150e2; }
+  .link-button.pocketcasts:hover    { color: #f43e37; border-color: #f43e37; }
 
   /* Recent episodes */
   .recent-episodes {
