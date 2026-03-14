@@ -75,10 +75,10 @@ export async function GET(context) {
       <pubDate>${pubDate}</pubDate>
       <enclosure url="${escapeXml(episode.data.audioUrl)}" length="${episode.data.audioSize}" type="${inferEnclosureType(episode.data.audioUrl)}" />
       <itunes:title>${escapeXml(episode.data.title)}</itunes:title>
-      <itunes:episode>${episode.data.episodeNumber}</itunes:episode>
+      ${episode.data.episodeNumber > 0 ? `<itunes:episode>${episode.data.episodeNumber}</itunes:episode>` : ""}
       <itunes:episodeType>full</itunes:episodeType>
       <itunes:duration>${escapeXml(episode.data.duration)}</itunes:duration>
-      <itunes:explicit>${episode.data.explicit ? "yes" : "no"}</itunes:explicit>
+      <itunes:explicit>${episode.data.explicit ? "true" : "false"}</itunes:explicit>
       <itunes:summary>${escapeXml(episode.data.summary)}</itunes:summary>
       <itunes:image href="${coverUrl}" />
       ${hasChapters ? `<podcast:chapters url="${chaptersUrl}" type="application/json+chapters" />` : ""}
@@ -90,7 +90,8 @@ export async function GET(context) {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-  xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  xmlns:podcast="https://podcastindex.org/namespace/1.0"
+  xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>${escapeXml(SITE.title)}</title>
     <description>${escapeXml(SITE.tagline)}</description>
@@ -103,9 +104,12 @@ export async function GET(context) {
       <itunes:name>${escapeXml(SITE.title)}</itunes:name>
       <itunes:email>${escapeXml(SITE.email)}</itunes:email>
     </itunes:owner>
-    <itunes:explicit>no</itunes:explicit>
+    <itunes:explicit>false</itunes:explicit>
     <itunes:category text="Technology" />
     <itunes:image href="${siteUrl}/images/podcast-cover.png" />
+    <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
+    <podcast:locked>no</podcast:locked>
+    <podcast:guid>0c9a64c8-fda0-4fb3-bd87-60f8faeb13c3</podcast:guid>
     ${items.join("\n    ")}
   </channel>
 </rss>`;
