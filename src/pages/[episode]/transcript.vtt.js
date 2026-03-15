@@ -16,29 +16,24 @@ export async function getStaticPaths() {
  * Expected format in the markdown body:
  *   ## Transcript
  *   **Speaker Name**: line of dialogue
- *   *HH:MM:SS*
- *
- * Consecutive lines from the same speaker (no timestamp in between) are merged.
+ *   *HH:MM:SS*  or  *MM:SS*
  */
 function parseTranscript(rawMarkdown) {
   const lines = rawMarkdown.split("\n");
 
-  // Find the transcript section
   const transcriptStart = lines.findIndex((l) =>
     /^##\s+transcript/i.test(l.trim())
   );
   if (transcriptStart === -1) return [];
 
   const section = lines.slice(transcriptStart + 1);
-
   const cues = [];
   let i = 0;
 
   while (i < section.length) {
     const line = section[i].trim();
-
-    // Speaker line: **Name**: text
     const speakerMatch = line.match(/^\*\*(.+?)\*\*:\s*(.*)$/);
+
     if (speakerMatch) {
       const speaker = speakerMatch[1];
       const text = speakerMatch[2];
@@ -69,7 +64,7 @@ function parseTranscript(rawMarkdown) {
   return cues;
 }
 
-/** Convert HH:MM:SS to total seconds */
+/** Convert HH:MM:SS or MM:SS to total seconds */
 function toSeconds(ts) {
   if (!ts) return null;
   const parts = ts.split(":").map(Number);
@@ -78,22 +73,27 @@ function toSeconds(ts) {
   return parts[0];
 }
 
-/** Format seconds as WebVTT timestamp: HH:MM:SS.000 */
-function toVtt(seconds) {
+/**
+ * Format seconds as MM:SS.mmm (matching AI-generated transcript style).
+ * Omits the HH: component unless the episode is >= 1 hour.
+ */
+function toVtt(seconds, includeHours) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.000`;
+  const s = (seconds % 60).toFixed(3).padStart(6, "0");
+  if (includeHours) {
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${s}`;
+  }
+  return `${String(m).padStart(2, "0")}:${s}`;
 }
 
-export async function GET({ props, params }) {
+export async function GET({ props }) {
   const { episode } = props;
 
-  // Read the raw .md file from the content collection
   const mdPath = path.resolve(
     process.cwd(),
     "src/content/episodes",
-    `${episode.id}`
+    episode.id   // episode.id already includes .md
   );
 
   let raw;
@@ -105,7 +105,6 @@ export async function GET({ props, params }) {
     });
   }
 
-  // Strip frontmatter
   const body = raw.replace(/^---[\s\S]*?---\n/, "");
   const cues = parseTranscript(body);
 
@@ -116,16 +115,21 @@ export async function GET({ props, params }) {
     });
   }
 
-  // Build VTT cues — use next cue's timestamp as end time, +30s fallback for last
+  // Determine if any cue exceeds 1 hour — if so, use HH:MM:SS.mmm throughout
   const FALLBACK_DURATION = 30;
+  const allSeconds = cues
+    .map((c) => toSeconds(c.timestamp))
+    .filter((s) => s !== null);
+  const maxSeconds = allSeconds.length ? Math.max(...allSeconds) : 0;
+  const includeHours = maxSeconds >= 3600;
+
   const lines = ["WEBVTT", ""];
 
   for (let i = 0; i < cues.length; i++) {
     const cue = cues[i];
     const startSec = toSeconds(cue.timestamp) ?? 0;
 
-    let endSec;
-    // Find the next cue that has a timestamp
+    // Find next cue with a timestamp for end time
     let nextTimestamp = null;
     for (let k = i + 1; k < cues.length; k++) {
       if (cues[k].timestamp) {
@@ -133,15 +137,14 @@ export async function GET({ props, params }) {
         break;
       }
     }
-    endSec = nextTimestamp
+    let endSec = nextTimestamp
       ? toSeconds(nextTimestamp)
       : startSec + FALLBACK_DURATION;
 
-    // Ensure end is always after start
     if (endSec <= startSec) endSec = startSec + FALLBACK_DURATION;
 
-    lines.push(`${toVtt(startSec)} --> ${toVtt(endSec)}`);
-    lines.push(`<v ${cue.speaker}>${cue.text}`);
+    lines.push(`${toVtt(startSec, includeHours)} --> ${toVtt(endSec, includeHours)}`);
+    lines.push(`[${cue.speaker}]: ${cue.text}`);
     lines.push("");
   }
 

@@ -2,6 +2,10 @@ import { getCollection } from "astro:content";
 import { SITE } from "../config";
 import fs from "node:fs/promises";
 import path from "node:path";
+import MarkdownIt from "markdown-it";
+import sanitizeHtml from "sanitize-html";
+
+const md = new MarkdownIt({ html: true, linkify: true });
 
 function inferEnclosureType(audioUrl) {
   const normalized = audioUrl.split("?")[0].toLowerCase();
@@ -50,6 +54,34 @@ export async function GET(context) {
     sortedEpisodes.map((ep) => hasTranscript(ep))
   );
 
+  const renderedHtml = await Promise.all(
+    sortedEpisodes.map(async (episode) => {
+      try {
+        const mdPath = path.resolve(
+          process.cwd(),
+          "src/content/episodes",
+          episode.id
+        );
+        const raw = await fs.readFile(mdPath, "utf-8");
+        // Strip YAML frontmatter
+        const withoutFrontmatter = raw.replace(/^---[\s\S]*?---\n?/, "");
+        // Strip ## Transcript section (and everything after) appended by publish script
+        const body = withoutFrontmatter.replace(/^##\s+transcript[\s\S]*/im, "").trimEnd();
+        const html = md.render(body);
+        return sanitizeHtml(html, {
+          allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
+          allowedAttributes: {
+            ...sanitizeHtml.defaults.allowedAttributes,
+            img: ["src", "alt", "title", "width", "height"],
+            a: ["href", "name", "target", "rel"],
+          },
+        });
+      } catch {
+        return "";
+      }
+    })
+  );
+
   const items = sortedEpisodes.map((episode, idx) => {
     const coverUrl = episode.data.coverImage?.startsWith("http")
       ? episode.data.coverImage
@@ -71,9 +103,10 @@ export async function GET(context) {
       <title>${escapeXml(episode.data.title)}</title>
       <link>${siteUrl}/${episode.data.episodeNumber}</link>
       <guid isPermaLink="true">${siteUrl}/${episode.data.episodeNumber}</guid>
-      <description>${escapeXml(episode.data.summary)}</description>
+      <description><![CDATA[${episode.data.summary}]]></description>
       <pubDate>${pubDate}</pubDate>
       <enclosure url="${escapeXml(episode.data.audioUrl)}" length="${episode.data.audioSize}" type="${inferEnclosureType(episode.data.audioUrl)}" />
+      <content:encoded><![CDATA[${renderedHtml[idx]}]]></content:encoded>
       <itunes:title>${escapeXml(episode.data.title)}</itunes:title>
       ${episode.data.episodeNumber > 0 ? `<itunes:episode>${episode.data.episodeNumber}</itunes:episode>` : ""}
       <itunes:episodeType>full</itunes:episodeType>
@@ -82,8 +115,8 @@ export async function GET(context) {
       <itunes:summary>${escapeXml(episode.data.summary)}</itunes:summary>
       <itunes:image href="${coverUrl}" />
       ${hasChapters ? `<podcast:chapters url="${chaptersUrl}" type="application/json+chapters" />` : ""}
-      ${epHasTranscript ? `<podcast:transcript url="${vttUrl}" type="text/vtt" rel="captions" />` : ""}
-      ${epHasTranscript ? `<podcast:transcript url="${txtUrl}" type="text/plain" />` : ""}
+      ${epHasTranscript ? `<podcast:transcript url="${vttUrl}" type="text/vtt" rel="captions" language="en" />` : ""}
+      ${epHasTranscript ? `<podcast:transcript url="${txtUrl}" type="text/plain" language="en" />` : ""}
     </item>`;
   });
 
@@ -91,10 +124,11 @@ export async function GET(context) {
 <rss version="2.0"
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
   xmlns:podcast="https://podcastindex.org/namespace/1.0"
-  xmlns:atom="http://www.w3.org/2005/Atom">
+  xmlns:atom="http://www.w3.org/2005/Atom"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>${escapeXml(SITE.title)}</title>
-    <description>${escapeXml(SITE.tagline)}</description>
+    <description><![CDATA[${escapeXml(SITE.tagline)}]]></description>
     <link>${siteUrl}/</link>
     <language>en-us</language>
     <itunes:author>${escapeXml(SITE.title)}</itunes:author>
@@ -109,7 +143,7 @@ export async function GET(context) {
     <itunes:image href="${siteUrl}/images/podcast-cover.png" />
     <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
     <podcast:locked>no</podcast:locked>
-    <podcast:guid>0c9a64c8-fda0-4fb3-bd87-60f8faeb13c3</podcast:guid>
+    <podcast:guid>0a0a0a0a-0000-0000-0000-000000000000</podcast:guid>
     ${items.join("\n    ")}
   </channel>
 </rss>`;
