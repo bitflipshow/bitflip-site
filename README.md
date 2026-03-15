@@ -58,34 +58,60 @@ The Markdown body is used for full show notes and links.
 
 ## Publishing workflow
 
-The Markdown body is used for full show notes and links.
-
 1. **Record and mix audio.** Export your final mix as WAV or FLAC.
-2. **Run `jivedrop` to generate the MP3.**
-   [jivedrop](https://github.com/linuxmatters/jivedrop) encodes a distribution-ready MP3 (112kbps CBR mono, ID3v2 tags, embedded cover art) in one command:
+
+2. **Create the episode Markdown file** in `episodes/` with required frontmatter. Leave `audioUrl`, `audioSize`, and `duration` blank — the publish script fills these in.
+
+3. **Run `publish.sh`:**
+
 ```bash
-   jivedrop recording.flac \
-     --title "Your Episode Title" \
-     --num 42 \
-     --artist "Bitflip" \
-     --album "Bitflip" \
-     --date "2025-03-01" \
-     --comment "https://bitflip.show/42" \
-     --cover artwork.png
+./publish.sh episodes/0042-slug.md recording.flac [options]
 ```
 
-   This produces `Bitflip-42.mp3`. jivedrop will print the `duration` and file size when it finishes — keep those handy for the next step.
+The script will:
+- Encode a distribution-ready MP3 (112kbps CBR mono, ID3v2 tags, embedded cover art and chapters)
+- Upload the MP3 to Cloudflare R2
+- Patch `audioUrl`, `audioSize`, and `duration` in the episode frontmatter automatically
 
-3. **Upload the MP3 to R2 and copy the public URL.**
-4. **Update the episode frontmatter** in `episodes/00XX-slug.md` with the values from steps 2 and 3:
-```yaml
-   audioUrl: "https://cdn.bitflip.show/bitflip-42.mp3"
-   audioSize: 52428800   # bytes, from jivedrop output
-   duration: "1:02:34"   # from jivedrop output
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--cover <file>` | Cover art image (default: `public/images/podcast-cover.png`) |
+| `--skip-encode` | Skip encoding; use source file as-is (must already be an MP3) |
+| `--skip-upload` | Skip R2 upload |
+| `--transcribe` | Transcribe with faster-whisper and embed transcript in the episode Markdown |
+| `--dry-run` | Show what would happen without making any changes |
+
+**Transcription** (`--transcribe`) uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and optionally [pyannote](https://github.com/pyannote/pyannote-audio) for speaker diarization. Configure at the top of the script:
+
+```bash
+WHISPER_MODE="local"          # "local" or "remote" (SSH)
+WHISPER_MODEL="large-v3-turbo"
+WHISPER_BEAM=10               # 1=fastest, 5=default, 10=most accurate
+WHISPER_LANG="en"
+WHISPER_DIARIZE=true         # true to label Speaker_00, Speaker_01, etc.
+WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"   # required for diarization
+WHISPER_PROMPT="..."          # optional context to improve accuracy
 ```
-5. **Commit and push** — GitHub Actions deploys to Cloudflare Pages.
 
-> Download jivedrop binaries for Linux and macOS from the [releases page](https://github.com/linuxmatters/jivedrop/releases).
+Diarization requires a [Hugging Face](https://huggingface.co/) token with access to [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1). Store your token in `~/.config/bitflip/hf_token`.
+
+4. **Commit and push** — GitHub Actions deploys to Cloudflare Pages.
+
+### One-time setup
+
+**rclone R2 remote** (required for upload):
+
+```bash
+rclone config
+# New remote > name: r2 > type: s3 > provider: Cloudflare
+# access_key_id + secret_access_key from R2 dashboard > API tokens
+# endpoint: https://<account-id>.r2.cloudflarestorage.com
+# leave region blank
+```
+
+**Script dependencies:** `ffmpeg`, `ffprobe`, `rclone`. For `--transcribe local`: `python3`. For `--transcribe remote`: `ssh`, `scp`, and `python3` on the remote host. The Python venv and all packages are created and managed automatically.
 
 ## Audio player
 
