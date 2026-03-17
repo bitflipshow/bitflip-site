@@ -552,7 +552,7 @@ extract_audio_metadata() {
   DURATION=$(ffprobe -v error \
     -show_entries format=duration \
     -of default=noprint_wrappers=1:nokey=1 "$MP3_TEMP" |
-    awk '{h=int($1/3600);m=int(($1%3600)/60);s=int($1%60); printf "%d:%02d:%02d",h,m,s}')
+    awk '{h=int($1/3600);m=int(($1%3600)/60);s=int($1%60); if(h>0) printf "%d:%02d:%02d",h,m,s; else printf "%d:%02d",m,s}')
 
   if stat --version >/dev/null 2>&1; then
     AUDIO_SIZE=$(stat -c%s "$MP3_TEMP")
