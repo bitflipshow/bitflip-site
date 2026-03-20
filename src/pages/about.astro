@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { SOCIAL } from "../config";
+import { SOCIAL, SITE } from "../config";
 ---
 
 <Base title="About | BitFlip.show">
@@ -60,9 +60,9 @@ import { SOCIAL } from "../config";
 
         <div class="about-card">
           <div class="section-title">Contact</div>
-          <p>Got a topic suggestion, feedback, or just want to say hello?</p>
-          <a href="/contact" class="about-button">
-            <i class="fa-solid fa-envelope"></i> Get in Touch
+          <p>Got a topic suggestion, feedback, or just want to say hello? Send us an email!</p>
+          <a href={`mailto:${SITE.email}`} class="about-button">
+            <i class="fa-solid fa-envelope"></i> {SITE.email}
           </a>
         </div>
       </div>
