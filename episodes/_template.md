@@ -10,7 +10,6 @@ duration: "00:58:12"
 coverImage: "/images/podcast-cover.png"
 explicit: false
 youtubeUrl: "https://youtube.com/watch?v=example"
-transcriptUrl: "https://example.com/transcripts/000.txt"
 chapters:
   - time: "00:00:00"
     title: "Intro"
