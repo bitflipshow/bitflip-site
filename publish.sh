@@ -28,7 +28,7 @@ R2_BUCKET="audio.bitflip.show"
 PUBLIC_AUDIO_URL="https://audio.bitflip.show"
 
 DEFAULT_COVER="public/images/podcast-cover.png"
-MP3_BITRATE="192k"
+MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
 WHISPER_MODE="local"   # local | remote
