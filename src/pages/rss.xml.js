@@ -120,6 +120,8 @@ export async function GET(context) {
     </item>`;
   });
 
+  const coverImageUrl = `${siteUrl}/images/podcast-cover.png`;
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
@@ -131,6 +133,11 @@ export async function GET(context) {
     <description><![CDATA[${escapeXml(SITE.tagline)}]]></description>
     <link>${siteUrl}/</link>
     <language>en-us</language>
+    <image>
+      <url>${coverImageUrl}</url>
+      <title>${escapeXml(SITE.title)}</title>
+      <link>${siteUrl}/</link>
+    </image>
     <itunes:author>${escapeXml(SITE.title)}</itunes:author>
     <itunes:summary>${escapeXml(SITE.tagline)}</itunes:summary>
     <itunes:type>episodic</itunes:type>
@@ -140,10 +147,10 @@ export async function GET(context) {
     </itunes:owner>
     <itunes:explicit>false</itunes:explicit>
     <itunes:category text="Technology" />
-    <itunes:image href="${siteUrl}/images/podcast-cover.png" />
+    <itunes:image href="${coverImageUrl}" />
     <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
     <podcast:locked>no</podcast:locked>
-    <podcast:guid>0a0a0a0a-0000-0000-0000-000000000000</podcast:guid>
+    <podcast:guid>${SITE.podcastGuid}</podcast:guid>
     ${items.join("\n    ")}
   </channel>
 </rss>`;
