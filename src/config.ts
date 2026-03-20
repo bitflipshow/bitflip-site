@@ -1,5 +1,6 @@
 export const SITE = {
   title: "BitFlip.show",
+  podcastTitle: "BitFlip",
   tagline: "The pragmatic side of infrastructure.",
   url: "https://bitflip.show",
   description: "The pragmatic side of infrastructure. A podcast hosted by Alex, Adam, Geoff, and Stephen.",

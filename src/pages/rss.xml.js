@@ -129,20 +129,20 @@ export async function GET(context) {
   xmlns:atom="http://www.w3.org/2005/Atom"
   xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
-    <title>${escapeXml(SITE.title)}</title>
+    <title>${escapeXml(SITE.podcastTitle)}</title>
     <description><![CDATA[${escapeXml(SITE.tagline)}]]></description>
     <link>${siteUrl}/</link>
     <language>en-us</language>
     <image>
       <url>${coverImageUrl}</url>
-      <title>${escapeXml(SITE.title)}</title>
+      <title>${escapeXml(SITE.podcastTitle)}</title>
       <link>${siteUrl}/</link>
     </image>
-    <itunes:author>${escapeXml(SITE.title)}</itunes:author>
+    <itunes:author>${escapeXml(SITE.podcastTitle)}</itunes:author>
     <itunes:summary>${escapeXml(SITE.tagline)}</itunes:summary>
     <itunes:type>episodic</itunes:type>
     <itunes:owner>
-      <itunes:name>${escapeXml(SITE.title)}</itunes:name>
+      <itunes:name>${escapeXml(SITE.podcastTitle)}</itunes:name>
       <itunes:email>${escapeXml(SITE.email)}</itunes:email>
     </itunes:owner>
     <itunes:explicit>false</itunes:explicit>

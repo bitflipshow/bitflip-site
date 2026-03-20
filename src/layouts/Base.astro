@@ -64,7 +64,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
       data-domain="bitflip.show"
       src="https://plausible.ktz.cloud/js/script.js"
     ></script>
-    <link rel="alternate" type="application/rss+xml" title="BitFlip.show Podcast Feed" href="/rss.xml" />
+    <link rel="alternate" type="application/rss+xml" title={`${SITE.podcastTitle} Podcast Feed`} href="/rss.xml" />
     <slot name="head" />
     <ClientRouter />
     <style>
