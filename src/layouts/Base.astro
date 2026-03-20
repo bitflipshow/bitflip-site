@@ -22,9 +22,20 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="generator" content={Astro.generator} />
+
+    <!-- Favicons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+
+    <!-- Web App Manifest (Android / Chrome "Add to Home Screen") -->
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Browser chrome color on mobile -->
+    <meta name="theme-color" content="#0f1117" />
+
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalURL} />
@@ -41,6 +52,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImageURL} />
+
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
@@ -124,7 +136,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
             <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
             <a href="/search" aria-current={Astro.url.pathname === '/search' ? 'page' : undefined}>Search</a>
             <a href={SOCIAL.discord} target="_blank" rel="noopener noreferrer">Discord</a>
-            <a href="/contact" aria-current={Astro.url.pathname === '/contact' ? 'page' : undefined}>Contact</a>
+
           </nav>
         </>
       )}
@@ -137,7 +149,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
           <nav class="footer-links" aria-label="Footer navigation">
             <a href="/about">About</a>
             <a href="/subscribe">Subscribe</a>
-            <a href="/contact">Contact</a>
+
             <a href="/rss.xml">RSS</a>
           </nav>
         </div>

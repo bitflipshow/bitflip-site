@@ -4,7 +4,7 @@ export const SITE = {
   url: "https://bitflip.show",
   description: "The pragmatic side of infrastructure. A podcast hosted by Alex, Adam, Geoff, and Stephen.",
   coverImage: "/images/podcast-cover.png",
-  email: "podcast@bitflip.show",
+  email: "contact@bitflip.show",
 };
 
 export const SOCIAL = {
