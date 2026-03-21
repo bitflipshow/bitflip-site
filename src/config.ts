@@ -19,4 +19,5 @@ export const SOCIAL = {
   podcastIndex: "https://podcastindex.org/podcast/7734731",
   applePodcasts: "https://podcasts.apple.com/us/podcast/bitflip-show/id1882773674",
   pocketCasts: "https://pca.st/hw7ez99r",
+  podLink: "https://pod.link/1882773674",
 };

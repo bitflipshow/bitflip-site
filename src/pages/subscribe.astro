@@ -67,6 +67,17 @@ import { SOCIAL } from "../config";
       </div>
 
       <div class="subscribe-card">
+        <div class="subscribe-icon podlink">
+          <i class="fa-solid fa-link"></i>
+        </div>
+        <h2>PodLink</h2>
+        <p>Find the show on your preferred app via PodLink.</p>
+        <a href={SOCIAL.podLink} target="_blank" rel="noopener noreferrer" class="subscribe-button podlink">
+          <i class="fa-solid fa-link"></i> PodLink
+        </a>
+      </div>
+
+      <div class="subscribe-card">
         <div class="subscribe-icon youtube">
           <i class="fa-brands fa-youtube"></i>
         </div>
@@ -94,7 +105,7 @@ import { SOCIAL } from "../config";
 
   .subscribe-options {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 24px;
   }
 
@@ -235,6 +246,21 @@ import { SOCIAL } from "../config";
 
   .subscribe-button.pocketcasts:hover {
     background: #f43e37;
+    color: #fff;
+  }
+
+  .subscribe-icon.podlink {
+    background: rgba(99, 100, 255, 0.1);
+    color: #6364ff;
+  }
+
+  .subscribe-button.podlink {
+    border-color: #6364ff;
+    color: #6364ff;
+  }
+
+  .subscribe-button.podlink:hover {
+    background: #6364ff;
     color: #fff;
   }
 
