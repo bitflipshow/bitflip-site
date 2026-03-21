@@ -7,7 +7,7 @@ summary: "Short summary for cards and RSS"
 audioUrl: "https://example.com/audio/episode.mp3"
 audioSize: 12345678
 duration: "00:58:12"
-coverImage: "/images/podcast-cover.png"
+coverImage: "/images/podcast-cover-large.png"
 explicit: false
 youtubeUrl: "https://youtube.com/watch?v=example"
 chapters:

@@ -26,7 +26,7 @@ const episodes = defineCollection({
       ),
     audioSize: z.number(),
     duration: z.string(),
-    coverImage: z.string().optional().default("/images/podcast-cover.png"),
+    coverImage: z.string().optional().default("/images/podcast-cover-large.png"),
     explicit: z.boolean(),
     youtubeUrl: z.string().url().optional(),
     transcriptUrl: z.string().url().optional(),
