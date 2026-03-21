@@ -36,9 +36,13 @@ preview: build
 publish episode audio:
     {{ publish_script }} "{{ episode }}" "{{ audio }}"
 
-# Full publish with transcription
+# Full publish with transcription (transcribes, generates chapters via Claude, then encodes + uploads)
 publish-transcribe episode audio:
     {{ publish_script }} "{{ episode }}" "{{ audio }}" --transcribe
+
+# Full publish with transcription, overwriting any existing chapters
+publish-transcribe-force episode audio:
+    {{ publish_script }} "{{ episode }}" "{{ audio }}" --transcribe --force-chapters
 
 # Full publish with custom cover art
 publish-cover episode audio cover:
@@ -58,13 +62,22 @@ encode episode audio output="":
         {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-upload
     fi
 
-# Encode and transcribe, save locally, no upload
+# Encode and transcribe (transcribes first, generates chapters, then encodes), save locally, no upload
 encode-transcribe episode audio output="":
     #!/usr/bin/env bash
     if [[ -n "{{ output }}" ]]; then
         {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-upload --transcribe --output "{{ output }}"
     else
         {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-upload --transcribe
+    fi
+
+# Encode and transcribe, overwriting any existing chapters, save locally, no upload
+encode-transcribe-force episode audio output="":
+    #!/usr/bin/env bash
+    if [[ -n "{{ output }}" ]]; then
+        {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-upload --transcribe --force-chapters --output "{{ output }}"
+    else
+        {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-upload --transcribe --force-chapters
     fi
 
 # ------------------------------------------------------------
@@ -74,6 +87,10 @@ encode-transcribe episode audio output="":
 
 transcribe episode audio:
     {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-encode --skip-upload --transcribe
+
+# Transcribe only, overwriting any existing chapters
+transcribe-force episode audio:
+    {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-encode --skip-upload --transcribe --force-chapters
 
 # ------------------------------------------------------------
 # Upload only: skip encode (audio must already be MP3)

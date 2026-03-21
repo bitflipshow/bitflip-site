@@ -3,21 +3,25 @@
 # with faster-whisper, uploads to R2, and patches the episode frontmatter.
 #
 # Usage:
-#   ./publish-episode.sh <episode.md> <source-audio> [options]
+#   ./publish.sh <episode.md> <source-audio> [options]
 #
 # Options:
-#   --dry-run        Show what would happen without making any changes
-#   --cover <file>   Cover art image (default: public/images/podcast-cover.png)
-#   --skip-encode    Use source audio as-is (must already be an MP3)
-#   --skip-upload    Skip R2 upload
-#   --transcribe     Transcribe with faster-whisper and embed in episode markdown
+#   --dry-run           Show what would happen without making any changes
+#   --cover <file>      Cover art image (default: public/images/podcast-cover-small.png)
+#   --skip-encode       Use source audio as-is (must already be an MP3)
+#   --skip-upload       Skip R2 upload
+#   --transcribe        Transcribe with faster-whisper; auto-generates chapters via Claude
+#   --force-chapters    Overwrite existing frontmatter chapters without prompting
+#
+# Pipeline order when --transcribe is set:
+#   encode → transcribe → generate chapters (Claude) → embed chapters → upload → patch frontmatter
 #
 # Requirements:
-#   ffmpeg, ffprobe, rclone
+#   ffmpeg, ffprobe, rclone, curl (for Claude API)
 #   --transcribe local:  python3
 #   --transcribe remote: ssh, scp, python3 on remote host
 
-set -euo pipefail
+set -Eeuo pipefail
 
 ########################################
 # Configuration
@@ -27,7 +31,7 @@ R2_REMOTE="r2"
 R2_BUCKET="audio.bitflip.show"
 PUBLIC_AUDIO_URL="https://audio.bitflip.show"
 
-DEFAULT_COVER="public/images/podcast-cover.png"
+DEFAULT_COVER="public/images/podcast-cover-small.png"
 MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
@@ -41,6 +45,10 @@ WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"   # Local path to a file cont
 # Optional prompt to improve accuracy — provide context like show name, host names,
 # and common technical terms. Leave empty to disable.
 WHISPER_PROMPT="BitFlip Show podcast. Hosts: Alex, Adam, Geoff, Stephen. Topics: self-hosting, Linux, Proxmox, Docker, LXC, Ansible, Jellyfin, Home Assistant, Tailscale, Unraid, open source infrastructure."
+
+# Claude API — used for chapter generation from transcript
+ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"   # Local path to a file containing your Anthropic API key (one line).
+CLAUDE_MODEL="claude-sonnet-4-6"
 
 # Remote transcription (WHISPER_MODE="remote")
 WHISPER_SSH_HOST="user@homeserver.local"  # user@host or SSH config alias
@@ -60,6 +68,8 @@ DRY_RUN=false
 SKIP_ENCODE=false
 SKIP_UPLOAD=false
 DO_TRANSCRIBE=false
+DO_GENERATE_CHAPTERS=false
+FORCE_CHAPTERS=false
 OUTPUT_FILE=""
 
 EPISODE_NUM=""
@@ -75,6 +85,7 @@ AUDIO_URL=""
 DURATION=""
 
 HF_TOKEN=""
+ANTHROPIC_API_KEY=""
 
 CLEANUP_FILES=()
 
@@ -97,19 +108,38 @@ require() {
   fi
 }
 
+# retry <attempts> <delay_seconds> <command> [args...]
+# Retries a command up to <attempts> times, waiting <delay_seconds> between tries.
+retry() {
+  local attempts="$1" delay="$2"
+  shift 2
+  local i
+  for (( i = 1; i <= attempts; i++ )); do
+    "$@" && return 0
+    if (( i < attempts )); then
+      log "Attempt ${i}/${attempts} failed — retrying in ${delay}s..."
+      sleep "$delay"
+    fi
+  done
+  return 1
+}
+
 ########################################
 # Argument Parsing
 ########################################
 
 usage() {
   echo "Usage: $0 <episode.md> <source-audio> [options]"
+  echo "       $0 <episode.md> --generate-chapters [--force-chapters] [--dry-run]"
   echo "Options:"
-  echo "  --dry-run          Show what would happen without making changes"
-  echo "  --cover <file>     Cover art image (default: $DEFAULT_COVER)"
-  echo "  --skip-encode      Use source audio as-is (must already be MP3)"
-  echo "  --skip-upload      Skip R2 upload"
-  echo "  --output <file>    Save final MP3 to this path (implied by --skip-upload)"
-  echo "  --transcribe       Transcribe and embed in episode markdown"
+  echo "  --dry-run             Show what would happen without making changes"
+  echo "  --cover <file>        Cover art image (default: $DEFAULT_COVER)"
+  echo "  --skip-encode         Use source audio as-is (must already be MP3)"
+  echo "  --skip-upload         Skip R2 upload"
+  echo "  --output <file>       Save final MP3 to this path (implied by --skip-upload)"
+  echo "  --transcribe          Transcribe and embed in episode markdown; generates chapters via Claude"
+  echo "  --generate-chapters   Generate chapters from existing transcript in the episode markdown"
+  echo "  --force-chapters      Overwrite existing frontmatter chapters without prompting"
   exit 1
 }
 
@@ -120,6 +150,8 @@ parse_args() {
       --skip-encode) SKIP_ENCODE=true ;;
       --skip-upload) SKIP_UPLOAD=true ;;
       --transcribe) DO_TRANSCRIBE=true ;;
+      --generate-chapters) DO_GENERATE_CHAPTERS=true ;;
+      --force-chapters) FORCE_CHAPTERS=true ;;
       --cover) COVER_ART="$2"; shift ;;
       --output) OUTPUT_FILE="$2"; shift ;;
       -*) usage ;;
@@ -136,7 +168,7 @@ parse_args() {
     shift
   done
 
-  if [[ -z "$MD_FILE" || -z "$SOURCE_AUDIO" ]]; then
+  if [[ -z "$MD_FILE" ]]; then
     usage
   fi
 
@@ -144,7 +176,20 @@ parse_args() {
     echo "Error: episode file not found: $MD_FILE" >&2; exit 1
   fi
 
-  if [[ ! -f "$SOURCE_AUDIO" ]]; then
+  # SOURCE_AUDIO is not required when only generating chapters from an existing transcript
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false && -z "$SOURCE_AUDIO" ]]; then
+    # Set flags so the pipeline skips all audio steps cleanly
+    SKIP_ENCODE=true
+    SKIP_UPLOAD=true
+    # Provide a dummy value so later guards don't trip on an empty variable
+    SOURCE_AUDIO="/dev/null"
+  fi
+
+  if [[ -z "$SOURCE_AUDIO" ]]; then
+    usage
+  fi
+
+  if [[ "$SOURCE_AUDIO" != "/dev/null" && ! -f "$SOURCE_AUDIO" ]]; then
     echo "Error: audio file not found: $SOURCE_AUDIO" >&2; exit 1
   fi
 }
@@ -161,12 +206,15 @@ check_dependencies() {
     require rclone
   fi
 
+  if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
+    require curl
+    require python3
+  fi
+
   if [[ "$DO_TRANSCRIBE" == true ]]; then
     if [[ "$WHISPER_MODE" == "remote" ]]; then
       require ssh
       require scp
-    else
-      require python3
     fi
   fi
 }
@@ -189,8 +237,35 @@ load_hf_token() {
 }
 
 ########################################
+# Anthropic API Key
+########################################
+
+load_anthropic_api_key() {
+  local key_file="${ANTHROPIC_API_KEY_FILE/#\~/$HOME}"
+
+  if [[ -f "$key_file" ]]; then
+    ANTHROPIC_API_KEY=$(tr -d '[:space:]' < "$key_file")
+  else
+    # Fall back to environment variable if file is absent
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+  fi
+
+  if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+    log "WARNING: No Anthropic API key found at $key_file and ANTHROPIC_API_KEY is not set."
+    log "         Chapter generation will be skipped."
+  fi
+}
+
+########################################
 # Markdown Frontmatter Helpers
 ########################################
+
+# sed_inplace: portable in-place sed for both GNU (Linux) and BSD (macOS).
+# Usage: sed_inplace 's/old/new/' file
+sed_inplace() {
+  sed -i.bak -e "$1" "$2"
+  rm -f "$2.bak"
+}
 
 fm_get() {
   local key="$1"
@@ -207,13 +282,89 @@ fm_set() {
   local key="$1" value="$2"
 
   if grep -q "^${key}:" "$MD_FILE"; then
-    sed -i.bak "s|^${key}:.*|${key}: ${value}|" "$MD_FILE"
+    sed_inplace "s|^${key}:.*|${key}: ${value}|" "$MD_FILE"
   else
-    sed -i.bak "0,/^---$/!{/^---$/i\\${key}: ${value}
-}" "$MD_FILE"
+    # Insert before the closing --- of the frontmatter
+    local tmp
+    tmp=$(mktemp)
+    awk -v key="$key" -v value="$value" '
+      /^---$/ && NR > 1 && !inserted {
+        print key ": " value
+        inserted = 1
+      }
+      { print }
+    ' "$MD_FILE" > "$tmp"
+    mv "$tmp" "$MD_FILE"
+  fi
+}
+
+# fm_has_chapters: returns 0 (true) if a chapters: block exists in frontmatter
+fm_has_chapters() {
+  awk '
+    /^---$/ {delim++; next}
+    delim==2 {exit}
+    delim==1 && /^chapters:/ {found=1; exit}
+    END {exit !found}
+  ' "$MD_FILE"
+}
+
+# fm_set_chapters: replace or insert the entire chapters: block in frontmatter.
+# Argument: path to a file whose contents are the YAML block to insert,
+# starting with "chapters:" and including all indented list items.
+fm_set_chapters() {
+  local chapters_file="$1"
+  local tmp
+  tmp=$(mktemp)
+
+  awk -v chf="$chapters_file" '
+    BEGIN {
+      # slurp the replacement block
+      while ((getline line < chf) > 0) {
+        block = block line "\n"
+      }
+      close(chf)
+    }
+    /^---$/ { delim++ }
+    # Inside frontmatter: skip the existing chapters block (and its indented children)
+    delim == 1 && !done {
+      if (/^chapters:/) {
+        in_chapters = 1
+        print block
+        next
+      }
+      if (in_chapters) {
+        # A line that starts with a non-space, non-dash top-level key ends the block
+        if (/^[a-zA-Z]/) {
+          in_chapters = 0
+          done = 1
+        } else {
+          next  # skip indented chapter lines
+        }
+      }
+    }
+    { print }
+  ' "$MD_FILE" > "$tmp"
+
+  # If chapters: was never found, insert it before the closing --- of the frontmatter
+  if ! grep -q "^chapters:" "$tmp"; then
+    awk -v chf="$chapters_file" '
+      BEGIN {
+        inserted = 0
+        while ((getline line < chf) > 0) {
+          block = block line "\n"
+        }
+        close(chf)
+      }
+      /^---$/ && NR > 1 && !inserted {
+        printf "%s", block
+        inserted = 1
+      }
+      { print }
+    ' "$tmp" > "${tmp}.2"
+    mv "${tmp}.2" "$tmp"
   fi
 
-  rm -f "${MD_FILE}.bak"
+  mv "$tmp" "$MD_FILE"
 }
 
 ########################################
@@ -251,7 +402,11 @@ encode_audio() {
   if [[ "$SKIP_ENCODE" == true ]]; then
     log "Skipping encode"
 
-    if [[ "$DRY_RUN" == false ]]; then cp "$SOURCE_AUDIO" "$MP3_TEMP"; fi
+    if [[ "$DRY_RUN" == false ]]; then
+      ffprobe -v error "$SOURCE_AUDIO" >/dev/null 2>&1 \
+        || fatal "Source audio is not a valid media file: $SOURCE_AUDIO"
+      cp "$SOURCE_AUDIO" "$MP3_TEMP"
+    fi
     return
   fi
 
@@ -279,124 +434,15 @@ encode_audio() {
 }
 
 ########################################
-# Chapters
-########################################
-
-# Convert HH:MM:SS or MM:SS timestamp to milliseconds
-ts_to_ms() {
-  local ts="$1"
-  local h=0 m=0 s=0
-  IFS=: read -r -a parts <<< "$ts"
-  case "${#parts[@]}" in
-    3) h="${parts[0]}"; m="${parts[1]}"; s="${parts[2]}" ;;
-    2) m="${parts[0]}"; s="${parts[1]}" ;;
-    *) fatal "Unrecognised chapter timestamp: $ts" ;;
-  esac
-  # Strip leading zeros to avoid bash treating values as octal (e.g. 09 -> 9)
-  h=$(( 10#$h ))
-  m=$(( 10#$m ))
-  s=$(( 10#$s ))
-  echo $(( (h * 3600 + m * 60 + s) * 1000 ))
-}
-
-embed_chapters() {
-  header "Embedding chapters"
-
-  if [[ "$DRY_RUN" == true ]]; then
-    log "[dry-run] chapter embedding"
-    return
-  fi
-
-  # Parse chapters block from frontmatter into parallel time/title arrays
-  local chapter_times=()
-  local chapter_titles=()
-  local in_chapters=0 current_time="" current_title=""
-
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^chapters: ]]; then
-      in_chapters=1
-      continue
-    fi
-    # Stop at next top-level frontmatter key
-    if [[ $in_chapters -eq 1 && "$line" =~ ^[a-zA-Z] ]]; then
-      break
-    fi
-    if [[ $in_chapters -eq 1 ]]; then
-      if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*time:[[:space:]]*\"?([0-9:]+)\"? ]]; then
-        current_time="${BASH_REMATCH[1]}"
-      elif [[ "$line" =~ ^[[:space:]]+title:[[:space:]]*\"?(.+)\"?$ ]]; then
-        current_title="${BASH_REMATCH[1]}"
-        current_title="${current_title%\"}"  # strip trailing quote if any
-      fi
-      if [[ -n "$current_time" && -n "$current_title" ]]; then
-        chapter_times+=("$current_time")
-        chapter_titles+=("$current_title")
-        current_time=""
-        current_title=""
-      fi
-    fi
-  done < <(awk '/^---$/{d++; next} d==1{print} d==2{exit}' "$MD_FILE")
-
-  if [[ "${#chapter_times[@]}" -eq 0 ]]; then
-    log "No chapters found"
-    return
-  fi
-
-  log "${#chapter_times[@]} chapters found"
-
-  # Get total duration in ms for the final chapter's end time
-  local total_ms
-  total_ms=$(ffprobe -v error \
-    -show_entries format=duration \
-    -of default=noprint_wrappers=1:nokey=1 "$MP3_TEMP" | \
-    awk '{printf "%d", $1 * 1000}')
-
-  # Write ffmpeg metadata file
-  local meta_file
-  meta_file=$(mktemp /tmp/bitflip-chapters.XXXXXX.txt)
-  CLEANUP_FILES+=("$meta_file")
-
-  echo ";FFMETADATA1" > "$meta_file"
-
-  local i
-  for i in "${!chapter_times[@]}"; do
-    local start_ms end_ms
-    start_ms=$(ts_to_ms "${chapter_times[$i]}")
-    if [[ $(( i + 1 )) -lt "${#chapter_times[@]}" ]]; then
-      end_ms=$(ts_to_ms "${chapter_times[$(( i + 1 ))]}")
-    else
-      end_ms="$total_ms"
-    fi
-    printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=%d\nEND=%d\ntitle=%s\n\n' \
-      "$start_ms" "$end_ms" "${chapter_titles[$i]}" >> "$meta_file"
-  done
-
-  # Remux MP3 with chapter metadata (audio stream copy, no re-encode)
-  local chaptered
-  chaptered=$(mktemp /tmp/bitflip-chaptered.XXXXXX.mp3)
-  CLEANUP_FILES+=("$chaptered")
-
-  ffmpeg -y -loglevel warning \
-    -i "$MP3_TEMP" \
-    -i "$meta_file" \
-    -map_metadata 1 \
-    -map 0 \
-    -c copy \
-    "$chaptered"
-
-  mv "$chaptered" "$MP3_TEMP"
-  # chaptered now points to a deleted path, remove from cleanup to avoid rm error
-  CLEANUP_FILES=("${CLEANUP_FILES[@]/$chaptered}")
-
-  log "Chapters embedded"
-}
-
-########################################
 # Transcription
 ########################################
 
 # Environment variables passed to transcribe.py (both local and remote)
 # transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_PROMPT
+
+# TRANSCRIPT_FILE is set by run_transcription_* and consumed by
+# generate_chapters_from_transcript and append_transcript.
+TRANSCRIPT_FILE=""
 
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
@@ -411,9 +457,8 @@ run_transcription() {
 run_transcription_local() {
   header "Transcribing (local, model: ${WHISPER_MODEL})"
 
-  local transcript
-  transcript=$(mktemp /tmp/transcript.XXXXXX.md)
-  CLEANUP_FILES+=("$transcript")
+  TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
+  CLEANUP_FILES+=("$TRANSCRIPT_FILE")
 
   if [[ "$DRY_RUN" == true ]]; then
     log "[dry-run] whisper transcription"
@@ -440,20 +485,17 @@ run_transcription_local() {
   WHISPER_PROMPT="$WHISPER_PROMPT" \
     "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
       "$MP3_TEMP" \
-      "$transcript" \
+      "$TRANSCRIPT_FILE" \
       "$WHISPER_MODEL" \
       "$WHISPER_LANG" \
       "$WHISPER_BEAM"
-
-  append_transcript "$transcript"
 }
 
 run_transcription_remote() {
   header "Transcribing (remote: ${WHISPER_SSH_HOST}, model: ${WHISPER_MODEL})"
 
-  local transcript
-  transcript=$(mktemp /tmp/transcript.XXXXXX.md)
-  CLEANUP_FILES+=("$transcript")
+  TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
+  CLEANUP_FILES+=("$TRANSCRIPT_FILE")
 
   if [[ "$DRY_RUN" == true ]]; then
     log "[dry-run] remote whisper transcription"
@@ -471,18 +513,15 @@ run_transcription_remote() {
 
   local ssh_opts=(-p "$WHISPER_SSH_PORT" -o BatchMode=yes)
 
-  # Prepare remote working directory
   log "Preparing remote workdir: ${WHISPER_SSH_HOST}:${remote_workdir}"
   ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "mkdir -p '$remote_workdir'"
 
-  # Upload audio and transcribe.py
   log "Uploading audio..."
   scp -P "$WHISPER_SSH_PORT" -q "$MP3_TEMP" "${WHISPER_SSH_HOST}:${remote_audio}"
 
   log "Uploading transcribe.py..."
   scp -P "$WHISPER_SSH_PORT" -q "$script_dir/scripts/transcribe.py" "${WHISPER_SSH_HOST}:${remote_script}"
 
-  # Bootstrap venv on remote if needed
   ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" bash <<REMOTE_SETUP
 set -euo pipefail
 venv="${remote_venv/#\~/\$HOME}"
@@ -494,7 +533,6 @@ if [[ ! -f "\$venv/bin/python" ]]; then
 fi
 REMOTE_SETUP
 
-  # Run transcription on remote
   log "Running transcription on remote..."
   ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" \
     WHISPER_DIARIZE="$WHISPER_DIARIZE" \
@@ -508,21 +546,22 @@ REMOTE_SETUP
       "$WHISPER_LANG" \
       "$WHISPER_BEAM"
 
-  # Retrieve transcript
   log "Retrieving transcript..."
-  scp -P "$WHISPER_SSH_PORT" -q "${WHISPER_SSH_HOST}:${remote_out}" "$transcript"
+  scp -P "$WHISPER_SSH_PORT" -q "${WHISPER_SSH_HOST}:${remote_out}" "$TRANSCRIPT_FILE"
 
-  # Clean up remote scratch files
   ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "rm -f '$remote_audio' '$remote_script' '$remote_out'"
-
-  append_transcript "$transcript"
 }
 
 append_transcript() {
+  if [[ "$DO_TRANSCRIBE" == false || -z "$TRANSCRIPT_FILE" ]]; then return; fi
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] append transcript to ${MD_FILE}"
+    return
+  fi
 
-  local src="$1"
+  header "Appending transcript"
+
   local tmp
-
   tmp=$(mktemp)
 
   awk '/^## [Tt]ranscript/{exit} {print}' "$MD_FILE" > "$tmp"
@@ -531,9 +570,315 @@ append_transcript() {
   echo "## Transcript" >> "$tmp"
   echo >> "$tmp"
 
-  cat "$src" >> "$tmp"
+  cat "$TRANSCRIPT_FILE" >> "$tmp"
 
   mv "$tmp" "$MD_FILE"
+
+  log "Transcript appended"
+}
+
+# Extract the ## Transcript section from the episode markdown into a temp file,
+# setting TRANSCRIPT_FILE. Calls fatal if no transcript section is found.
+extract_transcript_from_md() {
+  header "Extracting transcript from episode file"
+
+  local tmp
+  tmp=$(mktemp /tmp/transcript.XXXXXX.md)
+  CLEANUP_FILES+=("$tmp")
+
+  # Grab everything after the first ## Transcript heading
+  awk '/^## [Tt]ranscript/{found=1; next} found{print}' "$MD_FILE" > "$tmp"
+
+  if [[ ! -s "$tmp" ]]; then
+    fatal "No ## Transcript section found in ${MD_FILE} — cannot generate chapters."
+  fi
+
+  local line_count
+  line_count=$(wc -l < "$tmp")
+  log "Transcript extracted (${line_count} lines)"
+
+  TRANSCRIPT_FILE="$tmp"
+}
+
+########################################
+# Chapter Generation (Claude)
+########################################
+
+generate_chapters_from_transcript() {
+  if [[ "$DO_TRANSCRIBE" == false && "$DO_GENERATE_CHAPTERS" == false ]]; then return; fi
+
+  header "Generating chapters with Claude"
+
+  # Guard: existing chapters in frontmatter
+  if fm_has_chapters; then
+    if [[ "$FORCE_CHAPTERS" == false ]]; then
+      echo
+      echo "  WARNING: frontmatter already contains a chapters: block."
+      echo "  Pass --force-chapters to overwrite it with Claude-generated chapters."
+      echo "  Skipping chapter generation."
+      return
+    else
+      log "Overwriting existing chapters (--force-chapters)"
+    fi
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] Claude chapter generation"
+    return
+  fi
+
+  if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+    log "WARNING: Anthropic API key not available — skipping chapter generation."
+    log "         Add your key to ${ANTHROPIC_API_KEY_FILE} or set ANTHROPIC_API_KEY in the environment."
+    return
+  fi
+
+  if [[ -z "$TRANSCRIPT_FILE" || ! -f "$TRANSCRIPT_FILE" ]]; then
+    log "WARNING: transcript file not found — skipping chapter generation."
+    return
+  fi
+
+  # Truncate transcript if it would exceed safe Claude input limits.
+  # ~120k chars leaves comfortable headroom below the 200k token context window
+  # when combined with the prompt and expected output.
+  local MAX_TRANSCRIPT_CHARS=120000
+  local transcript_size
+  transcript_size=$(wc -c < "$TRANSCRIPT_FILE")
+
+  local transcript_content
+  if (( transcript_size > MAX_TRANSCRIPT_CHARS )); then
+    log "WARNING: transcript is ${transcript_size} chars — truncating to ${MAX_TRANSCRIPT_CHARS} for Claude."
+    transcript_content=$(head -c "$MAX_TRANSCRIPT_CHARS" "$TRANSCRIPT_FILE")
+  else
+    transcript_content=$(cat "$TRANSCRIPT_FILE")
+  fi
+
+  # Build the prompt
+  local prompt
+  prompt="You are a podcast editor. Given the transcript below, identify 8–16 meaningful chapter
+break points. For each chapter, output a YAML list item in exactly this format (no extra text,
+no markdown fences, no commentary — raw YAML only):
+
+  - time: \"HH:MM:SS\"
+    title: \"Chapter title\"
+
+Rules:
+- Times MUST use exactly three colon-separated components: hours, minutes, seconds — all zero-padded to two digits.
+  CORRECT:   00:00:00  00:03:45  01:02:33
+  INCORRECT: 0:00  3:45  1:02:33  (two-component MM:SS format is not allowed)
+- The first chapter must always start at 00:00:00.
+- Titles should be concise (3–7 words), sentence-case, no trailing punctuation.
+- Base break points on genuine topic shifts, not arbitrary intervals.
+- Output ONLY the YAML list items — nothing before or after.
+
+Transcript:
+${transcript_content}"
+
+  log "Calling Claude API (${CLAUDE_MODEL})..."
+
+  local payload_file response_file
+  payload_file=$(mktemp /tmp/bitflip-claude-payload.XXXXXX.json)
+  response_file=$(mktemp /tmp/bitflip-claude-response.XXXXXX.json)
+  CLEANUP_FILES+=("$payload_file" "$response_file")
+
+  # Build JSON payload via python3 (already a dependency) to handle escaping safely
+  python3 - "$CLAUDE_MODEL" "$prompt" "$payload_file" <<'PYEOF'
+import json, sys
+model, prompt, out = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {
+    "model": model,
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": prompt}],
+}
+with open(out, "w") as f:
+    json.dump(payload, f)
+PYEOF
+
+  local http_status
+  http_status=$(retry 3 5 curl -s -o "$response_file" -w "%{http_code}" \
+    https://api.anthropic.com/v1/messages \
+    -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    -d @"$payload_file")
+
+  if [[ "$http_status" != "200" ]]; then
+    log "WARNING: Claude API returned HTTP ${http_status} — skipping chapter generation."
+    log "         Response: $(cat "$response_file")"
+    return
+  fi
+
+  # A 200 can still carry an application-level error (e.g. overloaded, invalid request)
+  if ! grep -q '"content"' "$response_file"; then
+    log "WARNING: Claude response missing 'content' field — skipping chapter generation."
+    log "         Response: $(cat "$response_file")"
+    return
+  fi
+
+  # Extract the text content from the API response
+  local raw_yaml
+  raw_yaml=$(python3 -c "
+import json, sys
+with open('${response_file}') as f:
+    data = json.load(f)
+text = data.get('content', [{}])[0].get('text', '')
+print(text, end='')
+")
+
+  if [[ -z "$raw_yaml" ]]; then
+    log "WARNING: Claude returned an empty response — skipping chapter generation."
+    return
+  fi
+
+  # Validate: every line should be blank, a list item, or an indented time/title key
+  local invalid_lines
+  invalid_lines=$(echo "$raw_yaml" | grep -v '^\s*$' \
+    | grep -v '^\s*-\s*$' \
+    | grep -v '^\s*- time:' \
+    | grep -v '^\s*title:' \
+    | grep -v '^\s*time:' \
+    || true)
+
+  if [[ -n "$invalid_lines" ]]; then
+    log "WARNING: Claude response contains unexpected lines — skipping to avoid corrupting frontmatter."
+    log "         Unexpected: ${invalid_lines}"
+    return
+  fi
+
+  # Build the full chapters block to splice into frontmatter
+  local chapters_block_file
+  chapters_block_file=$(mktemp /tmp/bitflip-chapters-yaml.XXXXXX.txt)
+  CLEANUP_FILES+=("$chapters_block_file")
+
+  {
+    echo "chapters:"
+    echo "$raw_yaml"
+  } > "$chapters_block_file"
+
+  fm_set_chapters "$chapters_block_file"
+
+  local chapter_count
+  chapter_count=$(echo "$raw_yaml" | grep -c '^\s*- time:' || true)
+  log "${chapter_count} chapters written to frontmatter"
+}
+
+########################################
+# Chapters (embed into MP3)
+########################################
+
+# Convert HH:MM:SS or MM:SS timestamp to milliseconds.
+# HH:MM:SS is required from Claude, but MM:SS is accepted as a fallback
+# to avoid a fatal error if the model slips up.
+ts_to_ms() {
+  local ts="$1"
+  local h=0 m=0 s=0
+  IFS=: read -r -a parts <<< "$ts"
+  case "${#parts[@]}" in
+    3) h="${parts[0]}"; m="${parts[1]}"; s="${parts[2]}" ;;
+    2) m="${parts[0]}"; s="${parts[1]}" ;;   # MM:SS fallback
+    *) fatal "Unrecognised chapter timestamp: $ts" ;;
+  esac
+  h=$(( 10#$h ))
+  m=$(( 10#$m ))
+  s=$(( 10#$s ))
+  if (( m > 59 || s > 59 )); then
+    fatal "Chapter timestamp out of range: $ts (parsed as h=${h} m=${m} s=${s})"
+  fi
+  echo $(( (h * 3600 + m * 60 + s) * 1000 ))
+}
+
+embed_chapters() {
+  header "Embedding chapters"
+
+  # No audio to process when running chapter generation only
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    log "Skipping chapter embedding (no audio file — chapters written to frontmatter only)"
+    return
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] chapter embedding"
+    return
+  fi
+
+  local chapter_times=()
+  local chapter_titles=()
+  local in_chapters=0 current_time="" current_title=""
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^chapters: ]]; then
+      in_chapters=1
+      continue
+    fi
+    if [[ $in_chapters -eq 1 && "$line" =~ ^[a-zA-Z] ]]; then
+      break
+    fi
+    if [[ $in_chapters -eq 1 ]]; then
+      if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*time:[[:space:]]*\"?([0-9:]+)\"? ]]; then
+        current_time="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^[[:space:]]+title:[[:space:]]*\"?(.+)\"?$ ]]; then
+        current_title="${BASH_REMATCH[1]}"
+        current_title="${current_title%\"}"
+      fi
+      if [[ -n "$current_time" && -n "$current_title" ]]; then
+        chapter_times+=("$current_time")
+        chapter_titles+=("$current_title")
+        current_time=""
+        current_title=""
+      fi
+    fi
+  done < <(awk '/^---$/{d++; next} d==1{print} d==2{exit}' "$MD_FILE")
+
+  if [[ "${#chapter_times[@]}" -eq 0 ]]; then
+    log "No chapters found in frontmatter — skipping chapter embedding"
+    return
+  fi
+
+  log "${#chapter_times[@]} chapters found"
+
+  local total_ms
+  total_ms=$(ffprobe -v error \
+    -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$MP3_TEMP" | \
+    awk '{printf "%d", $1 * 1000}')
+
+  local meta_file
+  meta_file=$(mktemp /tmp/bitflip-chapters.XXXXXX.txt)
+  CLEANUP_FILES+=("$meta_file")
+
+  echo ";FFMETADATA1" > "$meta_file"
+
+  local i
+  for i in "${!chapter_times[@]}"; do
+    local start_ms end_ms
+    start_ms=$(ts_to_ms "${chapter_times[$i]}")
+    if [[ $(( i + 1 )) -lt "${#chapter_times[@]}" ]]; then
+      end_ms=$(ts_to_ms "${chapter_times[$(( i + 1 ))]}")
+    else
+      end_ms="$total_ms"
+    fi
+    printf '[CHAPTER]\nTIMEBASE=1/1000\nSTART=%d\nEND=%d\ntitle=%s\n\n' \
+      "$start_ms" "$end_ms" "${chapter_titles[$i]}" >> "$meta_file"
+  done
+
+  local chaptered
+  chaptered=$(mktemp /tmp/bitflip-chaptered.XXXXXX.mp3)
+  CLEANUP_FILES+=("$chaptered")
+
+  ffmpeg -y -loglevel warning \
+    -i "$MP3_TEMP" \
+    -i "$meta_file" \
+    -map_metadata 1 \
+    -map 0 \
+    -c copy \
+    "$chaptered"
+
+  mv "$chaptered" "$MP3_TEMP"
+  for i in "${!CLEANUP_FILES[@]}"; do
+    [[ "${CLEANUP_FILES[$i]}" == "$chaptered" ]] && unset 'CLEANUP_FILES[$i]'
+  done
+
+  log "Chapters embedded"
 }
 
 ########################################
@@ -543,6 +888,11 @@ append_transcript() {
 extract_audio_metadata() {
 
   header "Reading duration and file size"
+
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    log "Skipping (no audio file)"
+    return
+  fi
 
   if [[ "$DRY_RUN" == true ]]; then
     log "[dry-run] ffprobe"
@@ -575,7 +925,6 @@ upload_audio() {
   header "Uploading to R2"
 
   if [[ "$SKIP_UPLOAD" == true ]]; then
-    # Save the file locally instead — default to MP3_FILENAME in current dir
     local dest="${OUTPUT_FILE:-$MP3_FILENAME}"
     if [[ "$DRY_RUN" == false ]]; then
       cp "$MP3_TEMP" "$dest"
@@ -591,7 +940,7 @@ upload_audio() {
     return
   fi
 
-  rclone copyto "$MP3_TEMP" \
+  retry 3 5 rclone copyto "$MP3_TEMP" \
     "${R2_REMOTE}:${R2_BUCKET}/${MP3_FILENAME}" \
     --s3-acl public-read
 
@@ -635,25 +984,52 @@ main() {
   if [[ "$DO_TRANSCRIBE" == true ]]; then
     load_hf_token
   fi
+  if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
+    load_anthropic_api_key
+  fi
 
   read_metadata
 
+  # Step 1: encode source audio to MP3
   encode_audio
 
-  embed_chapters
-
+  # Step 2: transcribe (sets TRANSCRIPT_FILE); skipped when only --generate-chapters is set
   run_transcription
 
+  # Step 3: append transcript text to episode markdown
+  append_transcript
+
+  # Step 4a: if --generate-chapters without --transcribe, pull transcript from the episode file
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    extract_transcript_from_md
+  fi
+
+  # Step 4b: generate chapter markers from transcript via Claude, write into frontmatter
+  generate_chapters_from_transcript
+
+  # Step 5: embed chapters from frontmatter into the MP3
+  embed_chapters
+
+  # Step 6: read duration + size from the final MP3
   extract_audio_metadata
 
+  # Step 7: upload to R2 (or save locally)
   upload_audio
 
+  # Step 8: patch audioUrl / audioSize / duration into frontmatter
   patch_frontmatter
 
   echo
 
   if [[ "$DRY_RUN" == true ]]; then
     echo "Done (dry run)"
+  elif [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    echo "Done."
+    echo "Chapters written to: ${MD_FILE}"
+  elif [[ "$SKIP_UPLOAD" == true ]]; then
+    local dest="${OUTPUT_FILE:-$MP3_FILENAME}"
+    echo "Done."
+    echo "Saved to: ${dest}"
   else
     echo "Done."
     echo "Episode URL: ${PUBLIC_AUDIO_URL}/${MP3_FILENAME}"
