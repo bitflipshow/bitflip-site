@@ -4,9 +4,9 @@ export const SITE = {
   tagline: "The pragmatic side of infrastructure.",
   url: "https://bitflip.show",
   description: "The pragmatic side of infrastructure. A podcast hosted by Alex, Adam, Geoff, and Stephen.",
-  coverImage: "/images/podcast-cover-large.png",
+  coverImage: "/images/podcast-cover-largev1.png",
   email: "contact@bitflip.show",
-  podcastGuid: "0c9a64c8-fda0-4fb3-bd87-60f8faeb13c3",
+  podcastGuid: "b858c0d2-4856-402f-bb6b-c770b54f4dbd",
 };
 
 export const SOCIAL = {
