@@ -30,7 +30,7 @@ Optional:
 
 ```yaml
 draft: false
-coverImage: "/images/cover-101.png" # Default is /images/podcast-cover.png, use for special episode covers
+coverImage: "/images/cover-101.png" # Default is /images/podcast-cover-large.png, use for special episode covers
 youtubeUrl: "https://youtube.com/watch?v=..."
 transcriptUrl: "https://example.com/transcripts/episode.txt"
 chapters:
@@ -77,7 +77,7 @@ The script will:
 
 | Flag | Description |
 |---|---|
-| `--cover <file>` | Cover art image (default: `public/images/podcast-cover.png`) |
+| `--cover <file>` | Cover art image (default: `public/images/podcast-cover-small.png`) |
 | `--skip-encode` | Skip encoding; use source file as-is (must already be an MP3) |
 | `--skip-upload` | Skip R2 upload |
 | `--transcribe` | Transcribe with faster-whisper and embed transcript in the episode Markdown |
