@@ -4,22 +4,25 @@
 #
 # Usage:
 #   ./publish.sh <episode.md> <source-audio> [options]
+#   ./publish.sh <episode.md> --generate-chapters [--force-chapters] [--dry-run]
 #
 # Options:
-#   --dry-run           Show what would happen without making any changes
-#   --cover <file>      Cover art image (default: public/images/podcast-cover-small.png)
-#   --skip-encode       Use source audio as-is (must already be an MP3)
-#   --skip-upload       Skip R2 upload
-#   --transcribe        Transcribe with faster-whisper; auto-generates chapters via Claude
-#   --force-chapters    Overwrite existing frontmatter chapters without prompting
+#   --dry-run             Show what would happen without making any changes
+#   --cover <file>        Cover art image (default: public/images/podcast-cover-small.png)
+#   --skip-encode         Use source audio as-is (must already be an MP3)
+#   --skip-upload         Skip R2 upload; save MP3 locally instead
+#   --output <file>       Local path for saved MP3 (used with --skip-upload)
+#   --transcribe          Transcribe with faster-whisper and generate chapters via Claude
+#   --no-chapters         Transcribe but skip Claude chapter generation
+#   --generate-chapters   Generate chapters from existing ## Transcript in the episode file
+#   --force-chapters      Overwrite existing frontmatter chapters without prompting
 #
-# Pipeline order when --transcribe is set:
-#   encode → transcribe → generate chapters (Claude) → embed chapters → upload → patch frontmatter
+# Pipeline (full run):
+#   encode → transcribe → append transcript → generate chapters → embed chapters → upload → patch frontmatter
 #
 # Requirements:
-#   ffmpeg, ffprobe, rclone, curl (for Claude API)
-#   --transcribe local:  python3
-#   --transcribe remote: ssh, scp, python3 on remote host
+#   ffmpeg, ffprobe, rclone, curl, python3
+#   --transcribe remote: ssh, scp
 
 set -Eeuo pipefail
 
@@ -67,6 +70,7 @@ COVER_ART=""
 DRY_RUN=false
 SKIP_ENCODE=false
 SKIP_UPLOAD=false
+SKIP_CHAPTERS=false
 DO_TRANSCRIBE=false
 DO_GENERATE_CHAPTERS=false
 FORCE_CHAPTERS=false
@@ -86,6 +90,7 @@ DURATION=""
 
 HF_TOKEN=""
 ANTHROPIC_API_KEY=""
+TRANSCRIPT_FILE=""
 
 CLEANUP_FILES=()
 
@@ -138,6 +143,7 @@ usage() {
   echo "  --skip-upload         Skip R2 upload"
   echo "  --output <file>       Save final MP3 to this path (implied by --skip-upload)"
   echo "  --transcribe          Transcribe and embed in episode markdown; generates chapters via Claude"
+  echo "  --no-chapters         Transcribe but skip Claude chapter generation"
   echo "  --generate-chapters   Generate chapters from existing transcript in the episode markdown"
   echo "  --force-chapters      Overwrite existing frontmatter chapters without prompting"
   exit 1
@@ -150,6 +156,7 @@ parse_args() {
       --skip-encode) SKIP_ENCODE=true ;;
       --skip-upload) SKIP_UPLOAD=true ;;
       --transcribe) DO_TRANSCRIBE=true ;;
+      --no-chapters) SKIP_CHAPTERS=true ;;
       --generate-chapters) DO_GENERATE_CHAPTERS=true ;;
       --force-chapters) FORCE_CHAPTERS=true ;;
       --cover) COVER_ART="$2"; shift ;;
@@ -206,16 +213,15 @@ check_dependencies() {
     require rclone
   fi
 
+  # python3 needed for whisper venv bootstrap and for JSON payload/response handling
   if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
-    require curl
     require python3
+    require curl
   fi
 
-  if [[ "$DO_TRANSCRIBE" == true ]]; then
-    if [[ "$WHISPER_MODE" == "remote" ]]; then
-      require ssh
-      require scp
-    fi
+  if [[ "$DO_TRANSCRIBE" == true && "$WHISPER_MODE" == "remote" ]]; then
+    require ssh
+    require scp
   fi
 }
 
@@ -313,19 +319,15 @@ fm_has_chapters() {
 # starting with "chapters:" and including all indented list items.
 fm_set_chapters() {
   local chapters_file="$1"
-  local tmp
+  local tmp block
   tmp=$(mktemp)
 
-  awk -v chf="$chapters_file" '
-    BEGIN {
-      # slurp the replacement block
-      while ((getline line < chf) > 0) {
-        block = block line "\n"
-      }
-      close(chf)
-    }
+  # Slurp the replacement block once — reused in both awk passes below
+  block=$(cat "$chapters_file")
+
+  awk -v block="$block" '
     /^---$/ { delim++ }
-    # Inside frontmatter: skip the existing chapters block (and its indented children)
+    # Inside frontmatter: replace the existing chapters block
     delim == 1 && !done {
       if (/^chapters:/) {
         in_chapters = 1
@@ -333,7 +335,6 @@ fm_set_chapters() {
         next
       }
       if (in_chapters) {
-        # A line that starts with a non-space, non-dash top-level key ends the block
         if (/^[a-zA-Z]/) {
           in_chapters = 0
           done = 1
@@ -347,16 +348,9 @@ fm_set_chapters() {
 
   # If chapters: was never found, insert it before the closing --- of the frontmatter
   if ! grep -q "^chapters:" "$tmp"; then
-    awk -v chf="$chapters_file" '
-      BEGIN {
-        inserted = 0
-        while ((getline line < chf) > 0) {
-          block = block line "\n"
-        }
-        close(chf)
-      }
+    awk -v block="$block" '
       /^---$/ && NR > 1 && !inserted {
-        printf "%s", block
+        print block
         inserted = 1
       }
       { print }
@@ -394,6 +388,11 @@ read_metadata() {
 ########################################
 
 encode_audio() {
+  # Nothing to encode when only generating chapters from an existing transcript
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    return
+  fi
+
   header "Encoding MP3"
 
   MP3_TEMP=$(mktemp /tmp/bitflip-encoded.XXXXXX.mp3)
@@ -439,10 +438,6 @@ encode_audio() {
 
 # Environment variables passed to transcribe.py (both local and remote)
 # transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_PROMPT
-
-# TRANSCRIPT_FILE is set by run_transcription_* and consumed by
-# generate_chapters_from_transcript and append_transcript.
-TRANSCRIPT_FILE=""
 
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
@@ -606,25 +601,30 @@ extract_transcript_from_md() {
 
 generate_chapters_from_transcript() {
   if [[ "$DO_TRANSCRIBE" == false && "$DO_GENERATE_CHAPTERS" == false ]]; then return; fi
+  if [[ "$SKIP_CHAPTERS" == true ]]; then return; fi
 
   header "Generating chapters with Claude"
-
-  # Guard: existing chapters in frontmatter
-  if fm_has_chapters; then
-    if [[ "$FORCE_CHAPTERS" == false ]]; then
-      echo
-      echo "  WARNING: frontmatter already contains a chapters: block."
-      echo "  Pass --force-chapters to overwrite it with Claude-generated chapters."
-      echo "  Skipping chapter generation."
-      return
-    else
-      log "Overwriting existing chapters (--force-chapters)"
-    fi
-  fi
 
   if [[ "$DRY_RUN" == true ]]; then
     log "[dry-run] Claude chapter generation"
     return
+  fi
+
+  # Guard: existing chapters in frontmatter
+  if fm_has_chapters; then
+    if [[ "$FORCE_CHAPTERS" == true ]]; then
+      log "Overwriting existing chapters (--force-chapters)"
+    else
+      echo
+      echo "  WARNING: frontmatter already contains a chapters: block."
+      printf "  Overwrite with Claude-generated chapters? [y/N] "
+      local answer
+      read -r answer
+      if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+        log "Skipping chapter generation."
+        return
+      fi
+    fi
   fi
 
   if [[ -z "$ANTHROPIC_API_KEY" ]]; then
@@ -941,8 +941,7 @@ upload_audio() {
   fi
 
   retry 3 5 rclone copyto "$MP3_TEMP" \
-    "${R2_REMOTE}:${R2_BUCKET}/${MP3_FILENAME}" \
-    --s3-acl public-read
+    "${R2_REMOTE}:${R2_BUCKET}/${MP3_FILENAME}"
 
   log "Upload complete"
 }
@@ -984,7 +983,7 @@ main() {
   if [[ "$DO_TRANSCRIBE" == true ]]; then
     load_hf_token
   fi
-  if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
+  if [[ ("$DO_TRANSCRIBE" == true && "$SKIP_CHAPTERS" == false) || "$DO_GENERATE_CHAPTERS" == true ]]; then
     load_anthropic_api_key
   fi
 
