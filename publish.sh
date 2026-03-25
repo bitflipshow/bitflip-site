@@ -31,7 +31,7 @@ set -Eeuo pipefail
 ########################################
 
 R2_REMOTE="r2"
-R2_BUCKET="audio.bitflip.show"
+R2_BUCKET="bitflip-audio"
 PUBLIC_AUDIO_URL="https://audio.bitflip.show"
 
 DEFAULT_COVER="public/images/podcast-cover-small.png"
