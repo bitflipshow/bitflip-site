@@ -3,6 +3,12 @@ dist/
 # generated types
 .astro/
 
+# audio files
+audio/
+*.mp3
+*.wav
+*.flac
+
 # dependencies
 node_modules/
 
