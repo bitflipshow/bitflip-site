@@ -144,7 +144,7 @@ if diarize and hf_token:
         import torchaudio
 
         pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", token=hf_token
+            "pyannote/speaker-diarization-community-1", use_auth_token=hf_token
         )
 
         pipeline.to(torch.device(device))

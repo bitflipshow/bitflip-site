@@ -22,7 +22,6 @@
 #
 # Requirements:
 #   ffmpeg, ffprobe, rclone, curl, python3
-#   --transcribe remote: ssh, scp
 
 set -Eeuo pipefail
 
@@ -38,7 +37,6 @@ DEFAULT_COVER="public/images/podcast-cover-small.png"
 MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
-WHISPER_MODE="local"   # local | remote
 WHISPER_VENV="~/.local/share/bitflip/venv"
 WHISPER_MODEL="large-v3-turbo"   # tiny / base / small / medium / large-v2 / large-v3
 WHISPER_LANG="en"   # Language code (e.g. "en") or "auto" to detect.
@@ -52,12 +50,6 @@ WHISPER_PROMPT="BitFlip Show podcast. Hosts: Alex, Adam, Geoff, Stephen. Topics:
 # Claude API — used for chapter generation from transcript
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"   # Local path to a file containing your Anthropic API key (one line).
 CLAUDE_MODEL="claude-sonnet-4-6"
-
-# Remote transcription (WHISPER_MODE="remote")
-WHISPER_SSH_HOST="user@homeserver.local"  # user@host or SSH config alias
-WHISPER_SSH_PORT="22"
-WHISPER_REMOTE_VENV="~/.local/share/bitflip/venv"  # venv path on remote host
-WHISPER_REMOTE_WORKDIR="/tmp/bitflip-transcribe"    # scratch dir on remote host
 
 ########################################
 # Globals
@@ -217,11 +209,6 @@ check_dependencies() {
   if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
     require python3
     require curl
-  fi
-
-  if [[ "$DO_TRANSCRIBE" == true && "$WHISPER_MODE" == "remote" ]]; then
-    require ssh
-    require scp
   fi
 }
 
@@ -436,20 +423,12 @@ encode_audio() {
 # Transcription
 ########################################
 
-# Environment variables passed to transcribe.py (both local and remote)
+# Environment variables passed to transcribe.py
 # transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_PROMPT
 
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
 
-  if [[ "$WHISPER_MODE" == "remote" ]]; then
-    run_transcription_remote
-  else
-    run_transcription_local
-  fi
-}
-
-run_transcription_local() {
   header "Transcribing (local, model: ${WHISPER_MODEL})"
 
   TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
@@ -466,9 +445,49 @@ run_transcription_local() {
   if [[ ! -f "$venv/bin/python" ]]; then
     log "Creating venv: $venv"
     python3 -m venv "$venv"
+
+    # ----------------------------------------------------------------
+    # Package version rationale
+    # ----------------------------------------------------------------
+    # torch/torchaudio pinned to 2.8.0:
+    #   - ctranslate2 (faster-whisper) requires libcublas.so.12 (CUDA 12).
+    #     torch 2.11+ ships CUDA 13 wheels from PyPI by default, causing a
+    #     runtime library mismatch. torch 2.8.0 ships CUDA 12 libraries.
+    #   - torchaudio must match torch exactly per its dependency requirements.
+    #
+    # pyannote.audio pinned to 4.0.1:
+    #   - 4.0.2+ hard-pins torch==2.8.0 (exact), conflicting with other
+    #     packages. 4.0.1 uses the flexible torch>=2.0 requirement.
+    #   - 4.0.x depends on torchcodec for audio I/O, which requires CUDA 13.
+    #     We patch it out (see patch_pyannote_io.py).
+    #
+    # Patches applied after install (see scripts/patch_pyannote_io.py):
+    #   1. torchcodec uninstalled — requires libnvrtc.so.13 (CUDA 13),
+    #      incompatible with the CUDA 12 stack needed by ctranslate2.
+    #   2. pyannote/audio/core/io.py patched to replace all AudioDecoder
+    #      (torchcodec) calls with torchaudio.load/torchaudio.info.
+    #   3. use_auth_token renamed to token throughout pyannote source —
+    #      pyannote 4.x uses the updated HuggingFace Hub API parameter name.
+    #
+    # Reference: https://github.com/bobsummerwill/strato-transcripts/blob/main/WORKAROUNDS.md
+    # ----------------------------------------------------------------
+
+    "$venv/bin/pip" install -q "torch==2.8.0" "torchaudio==2.8.0"
     "$venv/bin/pip" install -q faster-whisper
+
     if [[ "$WHISPER_DIARIZE" == true ]]; then
-      "$venv/bin/pip" install -q pyannote.audio
+      "$venv/bin/pip" install -q "pyannote.audio==4.0.1" matplotlib
+
+      # Patch 1: remove torchcodec (requires CUDA 13)
+      "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
+
+      # Patch 2: replace torchcodec AudioDecoder calls with torchaudio equivalents
+      local io_py="${venv}/lib/python3.12/site-packages/pyannote/audio/core/io.py"
+      python3 "${script_dir}/scripts/patch_pyannote_io.py" "$io_py"
+
+      # Patch 3: rename use_auth_token → token throughout pyannote source
+      find "${venv}/lib/python3.12/site-packages/pyannote" -name "*.py"         -exec grep -l "use_auth_token" {} \;         | xargs --no-run-if-empty sed -i "s/use_auth_token/token/g"
+      log "Applied use_auth_token→token patch to pyannote"
     fi
   fi
 
@@ -484,67 +503,6 @@ run_transcription_local() {
       "$WHISPER_MODEL" \
       "$WHISPER_LANG" \
       "$WHISPER_BEAM"
-}
-
-run_transcription_remote() {
-  header "Transcribing (remote: ${WHISPER_SSH_HOST}, model: ${WHISPER_MODEL})"
-
-  TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
-  CLEANUP_FILES+=("$TRANSCRIPT_FILE")
-
-  if [[ "$DRY_RUN" == true ]]; then
-    log "[dry-run] remote whisper transcription"
-    return
-  fi
-
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-  local remote_workdir="$WHISPER_REMOTE_WORKDIR"
-  local remote_audio="${remote_workdir}/audio.mp3"
-  local remote_script="${remote_workdir}/transcribe.py"
-  local remote_out="${remote_workdir}/transcript.md"
-  local remote_venv="${WHISPER_REMOTE_VENV}"
-
-  local ssh_opts=(-p "$WHISPER_SSH_PORT" -o BatchMode=yes)
-
-  log "Preparing remote workdir: ${WHISPER_SSH_HOST}:${remote_workdir}"
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "mkdir -p '$remote_workdir'"
-
-  log "Uploading audio..."
-  scp -P "$WHISPER_SSH_PORT" -q "$MP3_TEMP" "${WHISPER_SSH_HOST}:${remote_audio}"
-
-  log "Uploading transcribe.py..."
-  scp -P "$WHISPER_SSH_PORT" -q "$script_dir/scripts/transcribe.py" "${WHISPER_SSH_HOST}:${remote_script}"
-
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" bash <<REMOTE_SETUP
-set -euo pipefail
-venv="${remote_venv/#\~/\$HOME}"
-if [[ ! -f "\$venv/bin/python" ]]; then
-  echo "  Creating remote venv: \$venv"
-  python3 -m venv "\$venv"
-  "\$venv/bin/pip" install -q faster-whisper
-  $( [[ "$WHISPER_DIARIZE" == true ]] && echo '"\$venv/bin/pip" install -q pyannote.audio' )
-fi
-REMOTE_SETUP
-
-  log "Running transcription on remote..."
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" \
-    WHISPER_DIARIZE="$WHISPER_DIARIZE" \
-    HF_TOKEN="$HF_TOKEN" \
-    WHISPER_PROMPT="$WHISPER_PROMPT" \
-    "${remote_venv/#\~/\$HOME}/bin/python" \
-      "$remote_script" \
-      "$remote_audio" \
-      "$remote_out" \
-      "$WHISPER_MODEL" \
-      "$WHISPER_LANG" \
-      "$WHISPER_BEAM"
-
-  log "Retrieving transcript..."
-  scp -P "$WHISPER_SSH_PORT" -q "${WHISPER_SSH_HOST}:${remote_out}" "$TRANSCRIPT_FILE"
-
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "rm -f '$remote_audio' '$remote_script' '$remote_out'"
 }
 
 append_transcript() {
