@@ -22,7 +22,6 @@
 #
 # Requirements:
 #   ffmpeg, ffprobe, rclone, curl, python3
-#   --transcribe remote: ssh, scp
 
 set -Eeuo pipefail
 
@@ -38,26 +37,15 @@ DEFAULT_COVER="public/images/podcast-cover-small.png"
 MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
-WHISPER_MODE="local"   # local | remote
 WHISPER_VENV="~/.local/share/bitflip/venv"
 WHISPER_MODEL="large-v3-turbo"   # tiny / base / small / medium / large-v2 / large-v3
 WHISPER_LANG="en"   # Language code (e.g. "en") or "auto" to detect.
-WHISPER_BEAM=10
 WHISPER_DIARIZE=true   # true to label speakers as Speaker_00, Speaker_01, etc.  Requires a Hugging Face token. Accept model licenses at: https://huggingface.co/pyannote/speaker-diarization-community-1
 WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"   # Local path to a file containing your HF token (one line).
-# Optional prompt to improve accuracy — provide context like show name, host names,
-# and common technical terms. Leave empty to disable.
-WHISPER_PROMPT="BitFlip Show podcast. Hosts: Alex, Adam, Geoff, Stephen. Topics: self-hosting, Linux, Proxmox, Docker, LXC, Ansible, Jellyfin, Home Assistant, Tailscale, Unraid, open source infrastructure."
 
 # Claude API — used for chapter generation from transcript
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"   # Local path to a file containing your Anthropic API key (one line).
 CLAUDE_MODEL="claude-sonnet-4-6"
-
-# Remote transcription (WHISPER_MODE="remote")
-WHISPER_SSH_HOST="user@homeserver.local"  # user@host or SSH config alias
-WHISPER_SSH_PORT="22"
-WHISPER_REMOTE_VENV="~/.local/share/bitflip/venv"  # venv path on remote host
-WHISPER_REMOTE_WORKDIR="/tmp/bitflip-transcribe"    # scratch dir on remote host
 
 ########################################
 # Globals
@@ -80,6 +68,7 @@ EPISODE_NUM=""
 EPISODE_TITLE=""
 EPISODE_DATE=""
 EPISODE_NUM_PADDED=""
+EPISODE_SPEAKERS=""
 
 MP3_TEMP=""
 MP3_FILENAME=""
@@ -218,11 +207,6 @@ check_dependencies() {
     require python3
     require curl
   fi
-
-  if [[ "$DO_TRANSCRIBE" == true && "$WHISPER_MODE" == "remote" ]]; then
-    require ssh
-    require scp
-  fi
 }
 
 ########################################
@@ -281,6 +265,22 @@ fm_get() {
     delim==1 && $0 ~ "^"key":" {
       sub("^"key":[[:space:]]*",""); gsub(/^"|"$/,""); print; exit
     }
+  ' "$MD_FILE"
+}
+
+fm_count_array() {
+  # Count items in a YAML array block within frontmatter.
+  # Handles both inline (- item) and the hosts/guests pattern.
+  local key="$1"
+  awk -v key="$key" '
+    /^---$/ { delim++; next }
+    delim==2 { exit }
+    delim==1 {
+      if ($0 ~ "^"key":") { in_block=1; next }
+      if (in_block && $0 ~ /^[[:space:]]*-/) { count++ }
+      if (in_block && $0 ~ /^[^[:space:]-]/) { in_block=0 }
+    }
+    END { print count+0 }
   ' "$MD_FILE"
 }
 
@@ -372,6 +372,15 @@ read_metadata() {
   EPISODE_TITLE=$(fm_get "title")
   EPISODE_DATE=$(fm_get "date")
 
+  # Count speakers from hosts + guests arrays for diarization hints
+  local host_count guest_count
+  host_count=$(fm_count_array "hosts")
+  guest_count=$(fm_count_array "guests")
+  EPISODE_SPEAKERS=$(( host_count + guest_count ))
+  if [[ "$EPISODE_SPEAKERS" -eq 0 ]]; then
+    EPISODE_SPEAKERS=""  # unknown — let diarization decide
+  fi
+
   if [[ -z "$EPISODE_NUM" ]]; then fatal "episodeNumber missing"; fi
   if [[ ! "$EPISODE_NUM" =~ ^[0-9]+$ ]]; then fatal "episodeNumber must be numeric"; fi
   if [[ -z "$EPISODE_DATE" ]]; then fatal "date missing from frontmatter"; fi
@@ -436,20 +445,12 @@ encode_audio() {
 # Transcription
 ########################################
 
-# Environment variables passed to transcribe.py (both local and remote)
-# transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_PROMPT
+# Environment variables passed to transcribe.py
+# transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_SPEAKERS
 
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
 
-  if [[ "$WHISPER_MODE" == "remote" ]]; then
-    run_transcription_remote
-  else
-    run_transcription_local
-  fi
-}
-
-run_transcription_local() {
   header "Transcribing (local, model: ${WHISPER_MODEL})"
 
   TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
@@ -466,10 +467,15 @@ run_transcription_local() {
   if [[ ! -f "$venv/bin/python" ]]; then
     log "Creating venv: $venv"
     python3 -m venv "$venv"
-    "$venv/bin/pip" install -q faster-whisper
-    if [[ "$WHISPER_DIARIZE" == true ]]; then
-      "$venv/bin/pip" install -q pyannote.audio
-    fi
+
+    # WhisperX handles transcription, alignment, and diarization in one package.
+    # It pins torch~=2.8.0 and torchaudio~=2.8.0 internally, which are compatible
+    # with ctranslate2's CUDA 12 requirements. torchcodec is uninstalled because
+    # it requires CUDA 13 (libnvrtc.so.13) which is not available on this system —
+    # WhisperX falls back gracefully to its own audio loading when torchcodec
+    # is absent, so this is safe.
+    "$venv/bin/pip" install -q whisperx
+    "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
   fi
 
   local script_dir
@@ -477,74 +483,12 @@ run_transcription_local() {
 
   WHISPER_DIARIZE="$WHISPER_DIARIZE" \
   HF_TOKEN="$HF_TOKEN" \
-  WHISPER_PROMPT="$WHISPER_PROMPT" \
+  WHISPER_SPEAKERS="$EPISODE_SPEAKERS" \
     "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
       "$MP3_TEMP" \
       "$TRANSCRIPT_FILE" \
       "$WHISPER_MODEL" \
-      "$WHISPER_LANG" \
-      "$WHISPER_BEAM"
-}
-
-run_transcription_remote() {
-  header "Transcribing (remote: ${WHISPER_SSH_HOST}, model: ${WHISPER_MODEL})"
-
-  TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
-  CLEANUP_FILES+=("$TRANSCRIPT_FILE")
-
-  if [[ "$DRY_RUN" == true ]]; then
-    log "[dry-run] remote whisper transcription"
-    return
-  fi
-
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-  local remote_workdir="$WHISPER_REMOTE_WORKDIR"
-  local remote_audio="${remote_workdir}/audio.mp3"
-  local remote_script="${remote_workdir}/transcribe.py"
-  local remote_out="${remote_workdir}/transcript.md"
-  local remote_venv="${WHISPER_REMOTE_VENV}"
-
-  local ssh_opts=(-p "$WHISPER_SSH_PORT" -o BatchMode=yes)
-
-  log "Preparing remote workdir: ${WHISPER_SSH_HOST}:${remote_workdir}"
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "mkdir -p '$remote_workdir'"
-
-  log "Uploading audio..."
-  scp -P "$WHISPER_SSH_PORT" -q "$MP3_TEMP" "${WHISPER_SSH_HOST}:${remote_audio}"
-
-  log "Uploading transcribe.py..."
-  scp -P "$WHISPER_SSH_PORT" -q "$script_dir/scripts/transcribe.py" "${WHISPER_SSH_HOST}:${remote_script}"
-
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" bash <<REMOTE_SETUP
-set -euo pipefail
-venv="${remote_venv/#\~/\$HOME}"
-if [[ ! -f "\$venv/bin/python" ]]; then
-  echo "  Creating remote venv: \$venv"
-  python3 -m venv "\$venv"
-  "\$venv/bin/pip" install -q faster-whisper
-  $( [[ "$WHISPER_DIARIZE" == true ]] && echo '"\$venv/bin/pip" install -q pyannote.audio' )
-fi
-REMOTE_SETUP
-
-  log "Running transcription on remote..."
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" \
-    WHISPER_DIARIZE="$WHISPER_DIARIZE" \
-    HF_TOKEN="$HF_TOKEN" \
-    WHISPER_PROMPT="$WHISPER_PROMPT" \
-    "${remote_venv/#\~/\$HOME}/bin/python" \
-      "$remote_script" \
-      "$remote_audio" \
-      "$remote_out" \
-      "$WHISPER_MODEL" \
-      "$WHISPER_LANG" \
-      "$WHISPER_BEAM"
-
-  log "Retrieving transcript..."
-  scp -P "$WHISPER_SSH_PORT" -q "${WHISPER_SSH_HOST}:${remote_out}" "$TRANSCRIPT_FILE"
-
-  ssh "${ssh_opts[@]}" "$WHISPER_SSH_HOST" "rm -f '$remote_audio' '$remote_script' '$remote_out'"
+      "$WHISPER_LANG"
 }
 
 append_transcript() {

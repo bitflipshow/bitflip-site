@@ -1,240 +1,263 @@
 #!/usr/bin/env python3
+"""
+Transcription script using WhisperX.
+
+WhisperX handles transcription, word-level alignment, and speaker diarization
+in a single integrated pipeline, replacing the previous faster-whisper +
+pyannote.audio combination which required extensive version pinning and patching.
+
+Usage (called from publish.sh):
+  python3 transcribe.py <audio> <output.md> <model> <language> [beam_size]
+
+Environment variables:
+  WHISPER_DIARIZE   - "true" to enable speaker diarization
+  HF_TOKEN          - HuggingFace token for pyannote diarization models
+  WHISPER_SPEAKERS  - number of speakers (count of hosts + guests from frontmatter)
+"""
 
 import sys
 import os
-import subprocess
 import warnings
-from faster_whisper import WhisperModel
 import torch
+
+# Suppress noisy warnings from pyannote/lightning
+warnings.filterwarnings("ignore")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # --------------------------------------------------
 # Arguments
 # --------------------------------------------------
 
 audio_path = sys.argv[1]
-out_path = sys.argv[2]
+out_path   = sys.argv[2]
 model_size = sys.argv[3]
-language = sys.argv[4] if sys.argv[4] != "auto" else None
-beam_size = int(sys.argv[5]) if len(sys.argv) > 5 else 5
-
-diarize = os.environ.get("WHISPER_DIARIZE", "false") == "true"
-hf_token = os.environ.get("HF_TOKEN", "")
-initial_prompt = os.environ.get("WHISPER_PROMPT")
+language   = sys.argv[4] if sys.argv[4] != "auto" else None
+diarize        = os.environ.get("WHISPER_DIARIZE", "false") == "true"
+hf_token       = os.environ.get("HF_TOKEN", "")
+_spk           = os.environ.get("WHISPER_SPEAKERS", "")
+num_speakers   = int(_spk) if _spk.isdigit() else None
 
 # --------------------------------------------------
 # Utility
 # --------------------------------------------------
 
-
 def fmt_ts(s):
-    h = int(s // 3600)
-    m = int((s % 3600) // 60)
+    h   = int(s // 3600)
+    m   = int((s % 3600) // 60)
     sec = int(s % 60)
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
-def get_duration(path):
-    try:
-        r = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                path,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return float(r.stdout.strip())
-    except Exception:
-        return 0.0
-
-
-def draw_progress(current, total):
-    if total <= 0:
-        return
-
-    pct = min(current / total, 1.0)
-
-    try:
-        width = os.get_terminal_size().columns
-    except OSError:
-        width = 80
-
-    suffix = f"] {int(pct*100):3d}%  {fmt_ts(current)} / {fmt_ts(total)}"
-    prefix = "  ["
-
-    bar_w = max(10, width - len(prefix) - len(suffix) - 1)
-
-    filled = int(bar_w * pct)
-    bar = "█" * filled + "░" * (bar_w - filled)
-
-    print(f"\r{prefix}{bar}{suffix}", end="", flush=True)
-
-
 # --------------------------------------------------
-# Model Setup
+# Device
 # --------------------------------------------------
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device       = "cuda" if torch.cuda.is_available() else "cpu"
 compute_type = "float16" if device == "cuda" else "int8"
 
 print(f"Device: {device} ({compute_type})")
 
-total_dur = get_duration(audio_path)
+# --------------------------------------------------
+# Load model and transcribe
+# --------------------------------------------------
+
+import whisperx
 
 print(f"Loading model: {model_size}")
 
-model = WhisperModel(model_size, device=device, compute_type=compute_type)
-
-# --------------------------------------------------
-# Transcription
-# --------------------------------------------------
-
-print(f"Transcribing ({fmt_ts(total_dur)})...")
-print()
-
-segments_iter, info = model.transcribe(
-    audio_path,
+model = whisperx.load_model(
+    model_size,
+    device,
+    compute_type=compute_type,
     language=language,
-    beam_size=beam_size,
-    initial_prompt=initial_prompt,
-    word_timestamps=True,
-    vad_filter=True,
-    vad_parameters={"min_silence_duration_ms": 500},
 )
 
-print(f"Language: {info.language} ({info.language_probability:.2f})")
-print()
+print("Loading audio...")
+audio = whisperx.load_audio(audio_path)
 
-segments = []
-all_words = []
+print("Transcribing...")
 
-for seg in segments_iter:
-    segments.append(seg)
+result = model.transcribe(
+    audio,
+    batch_size=16,
+    language=language,
+)
 
-    if seg.words:
-        for w in seg.words:
-            all_words.append((w.start, w.end, w.word))
+detected_lang = result.get("language", language or "unknown")
+print(f"Language: {detected_lang}")
+print(f"Segments: {len(result['segments'])}")
 
-    draw_progress(seg.end, total_dur)
-
-draw_progress(total_dur, total_dur)
-
-print()
-print(f"Segments: {len(segments)}, Words: {len(all_words)}")
+# Free GPU memory before alignment
+del model
+if device == "cuda":
+    torch.cuda.empty_cache()
 
 # --------------------------------------------------
-# Speaker Diarization
+# Word-level alignment
 # --------------------------------------------------
 
-speaker_map = []
+print("Aligning word timestamps...")
+
+try:
+    align_model, align_metadata = whisperx.load_align_model(
+        language_code=detected_lang,
+        device=device,
+    )
+
+    result = whisperx.align(
+        result["segments"],
+        align_model,
+        align_metadata,
+        audio,
+        device,
+        return_char_alignments=False,
+    )
+
+    del align_model
+    if device == "cuda":
+        torch.cuda.empty_cache()
+
+except Exception as e:
+    print(f"WARNING: alignment failed ({e}), using segment-level timestamps")
+
+# --------------------------------------------------
+# Speaker diarization
+# --------------------------------------------------
 
 if diarize and hf_token:
+    print("Running speaker diarization...")
+
     try:
-        print("Running speaker diarization...")
-
-        warnings.filterwarnings("ignore")
-
+        # Use pyannote directly (not via WhisperX wrapper) so we can access
+        # exclusive_speaker_diarization — a feature backported from precision-2
+        # that returns non-overlapping speaker turns, making word-speaker
+        # reconciliation much cleaner than regular diarization.
         from pyannote.audio import Pipeline
-        import torchaudio
+        from pyannote.audio.pipelines.utils.hook import ProgressHook
+        from whisperx.diarize import assign_word_speakers
+        import pandas as pd
 
         pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", token=hf_token
-        )
+            "pyannote/speaker-diarization-community-1",
+            token=hf_token,
+        ).to(torch.device(device))
 
-        pipeline.to(torch.device(device))
+        if num_speakers:
+            print(f"  Hint: {num_speakers} speakers (from frontmatter)")
+            kwargs = dict(min_speakers=num_speakers, max_speakers=num_speakers)
+        else:
+            kwargs = {}
 
-        waveform, sample_rate = torchaudio.load(audio_path)
+        audio_input = {
+            "waveform": torch.from_numpy(audio[None, :]),
+            "sample_rate": 16000,
+        }
 
-        audio_input = {"waveform": waveform, "sample_rate": sample_rate}
+        with ProgressHook() as hook:
+            output = pipeline(audio_input, hook=hook, **kwargs)
 
-        diar = pipeline(audio_input)
+        # Use exclusive_speaker_diarization — one speaker active at a time,
+        # dramatically simplifying word-to-speaker reconciliation.
+        rows = []
+        for turn, spk in output.exclusive_speaker_diarization:
+            # spk is a string label like "SPEAKER_0" or "A", "B" etc.
+            rows.append({"start": turn.start, "end": turn.end, "speaker": spk})
+        diarize_df = pd.DataFrame(rows)
 
-        for turn, speaker in diar.exclusive_speaker_diarization:
-            speaker_map.append((turn.start, turn.end, str(speaker)))
+        result = assign_word_speakers(diarize_df, result, fill_nearest=True)
 
-        speakers = len({s[2] for s in speaker_map})
-
-        print(f"{speakers} speakers detected")
+        speakers = {
+            w.get("speaker")
+            for seg in result["segments"]
+            for w in seg.get("words", [])
+            if w.get("speaker")
+        }
+        print(f"{len(speakers)} speakers detected")
 
     except Exception as e:
         print(f"WARNING: diarization failed ({e})")
 
 # --------------------------------------------------
-# Speaker helper
+# Build transcript lines grouped by speaker
 # --------------------------------------------------
 
-
-def get_speaker_at(t):
-    if not speaker_map:
+def get_speaker(seg, word=None):
+    """Get speaker label from word or segment, normalised."""
+    raw = None
+    if word:
+        raw = word.get("speaker")
+    if not raw:
+        raw = seg.get("speaker")
+    if not raw:
         return "Speaker"
-
-    for s, e, lbl in speaker_map:
-        if s <= t < e:
-            return lbl.replace("SPEAKER_", "Speaker_")
-
-    best = min(speaker_map, key=lambda x: min(abs(t - x[0]), abs(t - x[1])))
-    return best[2].replace("SPEAKER_", "Speaker_")
+    return raw.replace("SPEAKER_", "Speaker_")
 
 
-# --------------------------------------------------
-# Build Transcript Lines
-# --------------------------------------------------
+lines = []  # list of (start, speaker, text)
 
+for seg in result["segments"]:
+    words = seg.get("words", [])
 
-def build_lines(words, fallback_segments):
     if not words:
-        lines = []
+        # No word-level data — use segment as a single line
+        text = seg.get("text", "").strip()
+        if text:
+            spk   = get_speaker(seg)
+            start = seg.get("start", 0)
+            end   = seg.get("end", start)
+            lines.append((start, spk, text, end))
+        continue
 
-        for seg in fallback_segments:
-            text = seg.text.strip()
-            if text:
-                spk = get_speaker_at(seg.start)
-                lines.append((seg.start, spk, text))
-
-        return lines
-
-    labeled = [(w_start, w_end, w_text, get_speaker_at(w_start)) for w_start, w_end, w_text in words]
-
-    lines = []
-
-    cur_spk = labeled[0][3]
-    cur_start = labeled[0][0]
+    # Group consecutive words by speaker into lines
+    cur_spk   = get_speaker(seg, words[0])
+    cur_start = words[0].get("start", seg.get("start", 0))
+    cur_end   = cur_start
     cur_words = []
 
-    for w_start, w_end, w_text, spk in labeled:
+    for w in words:
+        spk  = get_speaker(seg, w)
+        text = w.get("word", "").strip()
+        wend = w.get("end", cur_end)
 
         if spk != cur_spk:
-
-            lines.append((cur_start, cur_spk, "".join(cur_words).strip()))
-
-            cur_spk = spk
-            cur_start = w_start
+            joined = " ".join(cur_words).strip()
+            if joined:
+                lines.append((cur_start, cur_spk, joined, cur_end))
+            cur_spk   = spk
+            cur_start = w.get("start", cur_end)
+            cur_end   = cur_start
             cur_words = []
 
-        cur_words.append(w_text)
+        if text:
+            cur_words.append(text)
+        cur_end = wend
 
-    if cur_words:
-        lines.append((cur_start, cur_spk, "".join(cur_words).strip()))
-
-    return [(s, spk, txt) for s, spk, txt in lines if txt]
-
-
-lines = build_lines(all_words, segments)
+    joined = " ".join(cur_words).strip()
+    if joined:
+        lines.append((cur_start, cur_spk, joined, cur_end))
 
 # --------------------------------------------------
-# Write Markdown Transcript
+# Merge consecutive same-speaker lines into paragraphs
+# --------------------------------------------------
+
+MERGE_GAP = 8.0  # merge lines from same speaker if gap is less than this (seconds)
+
+merged = []
+for start, spk, text, _end in lines:
+    if merged and merged[-1][1] == spk:
+        prev_start, prev_spk, prev_text, prev_end = merged[-1]
+        gap = start - prev_end
+        if gap < MERGE_GAP:
+            merged[-1] = (prev_start, prev_spk, prev_text + " " + text, start)
+            continue
+    merged.append((start, spk, text, start))
+
+# --------------------------------------------------
+# Write markdown transcript
 # --------------------------------------------------
 
 with open(out_path, "w") as f:
-
-    for start, spk, text in lines:
-
+    for start, spk, text, _ in merged:
         f.write(f"**{spk}**: {text}\n")
         f.write(f"*{fmt_ts(start)}*\n\n")
 
