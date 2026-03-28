@@ -40,12 +40,8 @@ MP3_CHANNELS="2"
 WHISPER_VENV="~/.local/share/bitflip/venv"
 WHISPER_MODEL="large-v3-turbo"   # tiny / base / small / medium / large-v2 / large-v3
 WHISPER_LANG="en"   # Language code (e.g. "en") or "auto" to detect.
-WHISPER_BEAM=10
 WHISPER_DIARIZE=true   # true to label speakers as Speaker_00, Speaker_01, etc.  Requires a Hugging Face token. Accept model licenses at: https://huggingface.co/pyannote/speaker-diarization-community-1
 WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"   # Local path to a file containing your HF token (one line).
-# Optional prompt to improve accuracy — provide context like show name, host names,
-# and common technical terms. Leave empty to disable.
-WHISPER_PROMPT="BitFlip Show podcast. Hosts: Alex, Adam, Geoff, Stephen. Topics: self-hosting, Linux, Proxmox, Docker, LXC, Ansible, Jellyfin, Home Assistant, Tailscale, Unraid, open source infrastructure."
 
 # Claude API — used for chapter generation from transcript
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"   # Local path to a file containing your Anthropic API key (one line).
@@ -72,6 +68,7 @@ EPISODE_NUM=""
 EPISODE_TITLE=""
 EPISODE_DATE=""
 EPISODE_NUM_PADDED=""
+EPISODE_SPEAKERS=""
 
 MP3_TEMP=""
 MP3_FILENAME=""
@@ -271,6 +268,22 @@ fm_get() {
   ' "$MD_FILE"
 }
 
+fm_count_array() {
+  # Count items in a YAML array block within frontmatter.
+  # Handles both inline (- item) and the hosts/guests pattern.
+  local key="$1"
+  awk -v key="$key" '
+    /^---$/ { delim++; next }
+    delim==2 { exit }
+    delim==1 {
+      if ($0 ~ "^"key":") { in_block=1; next }
+      if (in_block && $0 ~ /^[[:space:]]*-/) { count++ }
+      if (in_block && $0 ~ /^[^[:space:]-]/) { in_block=0 }
+    }
+    END { print count+0 }
+  ' "$MD_FILE"
+}
+
 fm_set() {
   local key="$1" value="$2"
 
@@ -359,6 +372,15 @@ read_metadata() {
   EPISODE_TITLE=$(fm_get "title")
   EPISODE_DATE=$(fm_get "date")
 
+  # Count speakers from hosts + guests arrays for diarization hints
+  local host_count guest_count
+  host_count=$(fm_count_array "hosts")
+  guest_count=$(fm_count_array "guests")
+  EPISODE_SPEAKERS=$(( host_count + guest_count ))
+  if [[ "$EPISODE_SPEAKERS" -eq 0 ]]; then
+    EPISODE_SPEAKERS=""  # unknown — let diarization decide
+  fi
+
   if [[ -z "$EPISODE_NUM" ]]; then fatal "episodeNumber missing"; fi
   if [[ ! "$EPISODE_NUM" =~ ^[0-9]+$ ]]; then fatal "episodeNumber must be numeric"; fi
   if [[ -z "$EPISODE_DATE" ]]; then fatal "date missing from frontmatter"; fi
@@ -424,7 +446,7 @@ encode_audio() {
 ########################################
 
 # Environment variables passed to transcribe.py
-# transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_PROMPT
+# transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_SPEAKERS
 
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
@@ -446,49 +468,14 @@ run_transcription() {
     log "Creating venv: $venv"
     python3 -m venv "$venv"
 
-    # ----------------------------------------------------------------
-    # Package version rationale
-    # ----------------------------------------------------------------
-    # torch/torchaudio pinned to 2.8.0:
-    #   - ctranslate2 (faster-whisper) requires libcublas.so.12 (CUDA 12).
-    #     torch 2.11+ ships CUDA 13 wheels from PyPI by default, causing a
-    #     runtime library mismatch. torch 2.8.0 ships CUDA 12 libraries.
-    #   - torchaudio must match torch exactly per its dependency requirements.
-    #
-    # pyannote.audio pinned to 4.0.1:
-    #   - 4.0.2+ hard-pins torch==2.8.0 (exact), conflicting with other
-    #     packages. 4.0.1 uses the flexible torch>=2.0 requirement.
-    #   - 4.0.x depends on torchcodec for audio I/O, which requires CUDA 13.
-    #     We patch it out (see patch_pyannote_io.py).
-    #
-    # Patches applied after install (see scripts/patch_pyannote_io.py):
-    #   1. torchcodec uninstalled — requires libnvrtc.so.13 (CUDA 13),
-    #      incompatible with the CUDA 12 stack needed by ctranslate2.
-    #   2. pyannote/audio/core/io.py patched to replace all AudioDecoder
-    #      (torchcodec) calls with torchaudio.load/torchaudio.info.
-    #   3. use_auth_token renamed to token throughout pyannote source —
-    #      pyannote 4.x uses the updated HuggingFace Hub API parameter name.
-    #
-    # Reference: https://github.com/bobsummerwill/strato-transcripts/blob/main/WORKAROUNDS.md
-    # ----------------------------------------------------------------
-
-    "$venv/bin/pip" install -q "torch==2.8.0" "torchaudio==2.8.0"
-    "$venv/bin/pip" install -q faster-whisper
-
-    if [[ "$WHISPER_DIARIZE" == true ]]; then
-      "$venv/bin/pip" install -q "pyannote.audio==4.0.1" matplotlib
-
-      # Patch 1: remove torchcodec (requires CUDA 13)
-      "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
-
-      # Patch 2: replace torchcodec AudioDecoder calls with torchaudio equivalents
-      local io_py="${venv}/lib/python3.12/site-packages/pyannote/audio/core/io.py"
-      python3 "${script_dir}/scripts/patch_pyannote_io.py" "$io_py"
-
-      # Patch 3: rename use_auth_token → token throughout pyannote source
-      find "${venv}/lib/python3.12/site-packages/pyannote" -name "*.py"         -exec grep -l "use_auth_token" {} \;         | xargs --no-run-if-empty sed -i "s/use_auth_token/token/g"
-      log "Applied use_auth_token→token patch to pyannote"
-    fi
+    # WhisperX handles transcription, alignment, and diarization in one package.
+    # It pins torch~=2.8.0 and torchaudio~=2.8.0 internally, which are compatible
+    # with ctranslate2's CUDA 12 requirements. torchcodec is uninstalled because
+    # it requires CUDA 13 (libnvrtc.so.13) which is not available on this system —
+    # WhisperX falls back gracefully to its own audio loading when torchcodec
+    # is absent, so this is safe.
+    "$venv/bin/pip" install -q whisperx
+    "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
   fi
 
   local script_dir
@@ -496,13 +483,12 @@ run_transcription() {
 
   WHISPER_DIARIZE="$WHISPER_DIARIZE" \
   HF_TOKEN="$HF_TOKEN" \
-  WHISPER_PROMPT="$WHISPER_PROMPT" \
+  WHISPER_SPEAKERS="$EPISODE_SPEAKERS" \
     "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
       "$MP3_TEMP" \
       "$TRANSCRIPT_FILE" \
       "$WHISPER_MODEL" \
-      "$WHISPER_LANG" \
-      "$WHISPER_BEAM"
+      "$WHISPER_LANG"
 }
 
 append_transcript() {
