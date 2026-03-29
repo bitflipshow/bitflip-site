@@ -240,17 +240,20 @@ for seg in result["segments"]:
 # Merge consecutive same-speaker lines into paragraphs
 # --------------------------------------------------
 
-MERGE_GAP = 8.0  # merge lines from same speaker if gap is less than this (seconds)
+MERGE_GAP        = 5.0  # max gap (seconds) between same-speaker lines to merge
+MERGE_MIN_WORDS  = 4    # only merge if the existing line has at least this many words
+                        # — keeps short utterances ("Bye!", "Yeah.") as discrete lines
 
 merged = []
 for start, spk, text, _end in lines:
     if merged and merged[-1][1] == spk:
         prev_start, prev_spk, prev_text, prev_end = merged[-1]
         gap = start - prev_end
-        if gap < MERGE_GAP:
+        prev_word_count = len(prev_text.split())
+        if gap < MERGE_GAP and prev_word_count >= MERGE_MIN_WORDS:
             merged[-1] = (prev_start, prev_spk, prev_text + " " + text, start)
             continue
-    merged.append((start, spk, text, start))
+    merged.append((start, spk, text, _end))
 
 # --------------------------------------------------
 # Write markdown transcript
