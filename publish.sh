@@ -255,11 +255,6 @@ check_dependencies() {
     require python3
     require curl
   fi
-
-  if [[ "$DO_TRANSCRIBE" == true && "$WHISPER_MODE" == "remote" ]]; then
-    require ssh
-    require scp
-  fi
 }
 
 ########################################
