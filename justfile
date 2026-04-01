@@ -29,83 +29,80 @@ preview: build
     npm run preview -- --host
 
 # ------------------------------------------------------------
+# Data pull
+# ------------------------------------------------------------
+
+# Pull episode doc from Outline and audio from FileBrowser, create the episode .md file
+# Usage: just pull 3
+pull episode:
+    ./pull-data.sh "{{ episode }}"
+
+# Pull episode doc from Outline only (skip audio download)
+# Usage: just pull-notes 3
+pull-notes episode:
+    ./pull-data.sh "{{ episode }}" --skip-audio
+
+# ------------------------------------------------------------
 # Publishing recipes
+#
+# Pass an episode number — files are resolved automatically from
+# the episodes/ and audio/ directories.
 #
 # publish              transcribe + Claude chapters + upload
 # publish-nochapters   transcribe only              + upload
 # publish-notx         (no transcription)           + upload
-# local                transcribe + Claude chapters  (no upload)
+# local                transcribe + Claude chapters  (no upload, saved locally)
 # local-nochapters     transcribe only               (no upload)
 # local-notx           (no transcription)            (no upload)
 # ------------------------------------------------------------
 
 # transcribe + Claude chapters + R2 upload
-# Usage: just publish episodes/0042-slug.md recording.flac
-#        just publish episodes/0042-slug.md recording.flac cover.png  (with custom cover art)
-publish episode audio cover="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}" --transcribe)
-    [[ -n "{{ cover }}" ]] && args+=(--cover "{{ cover }}")
-    {{ publish_script }} "${args[@]}"
+# Usage: just publish 3
+#        just publish 3 --cover path/to/cover.png
+publish episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcribe {{ flags }}
 
 # transcribe (no Claude chapters) + R2 upload
-# Usage: just publish-nochapters episodes/0042-slug.md recording.flac
-publish-nochapters episode audio cover="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}" --transcribe --no-chapters)
-    [[ -n "{{ cover }}" ]] && args+=(--cover "{{ cover }}")
-    {{ publish_script }} "${args[@]}"
+# Usage: just publish-nochapters 3
+publish-nochapters episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcribe --no-chapters {{ flags }}
 
-# encode + embed existing chapters + R2 upload (no transcription, no Claude chapters)
-# Usage: just publish-notx episodes/0042-slug.md recording.flac
-publish-notx episode audio cover="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}")
-    [[ -n "{{ cover }}" ]] && args+=(--cover "{{ cover }}")
-    {{ publish_script }} "${args[@]}"
+# encode + embed existing chapters + R2 upload (no transcription)
+# Usage: just publish-notx 3
+publish-notx episode *flags:
+    {{ publish_script }} "{{ episode }}" {{ flags }}
 
 # transcribe + Claude chapters, save locally (no R2 upload)
-# Usage: just local episodes/0042-slug.md recording.flac
-#        just local episodes/0042-slug.md recording.flac output.mp3
-local episode audio output="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}" --transcribe --skip-upload)
-    [[ -n "{{ output }}" ]] && args+=(--output "{{ output }}")
-    {{ publish_script }} "${args[@]}"
+# Usage: just local 3
+local episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcribe --skip-upload {{ flags }}
 
 # transcribe (no Claude chapters), save locally (no R2 upload)
-# Usage: just local-nochapters episodes/0042-slug.md recording.flac
-local-nochapters episode audio output="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}" --transcribe --no-chapters --skip-upload)
-    [[ -n "{{ output }}" ]] && args+=(--output "{{ output }}")
-    {{ publish_script }} "${args[@]}"
+# Usage: just local-nochapters 3
+local-nochapters episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcribe --no-chapters --skip-upload {{ flags }}
 
-# encode + embed existing chapters, save locally (no transcription, no Claude chapters, no R2 upload)
-# Usage: just local-notx episodes/0042-slug.md recording.flac
-local-notx episode audio output="":
-    #!/usr/bin/env bash
-    args=("{{ episode }}" "{{ audio }}" --skip-upload)
-    [[ -n "{{ output }}" ]] && args+=(--output "{{ output }}")
-    {{ publish_script }} "${args[@]}"
+# encode + embed existing chapters, save locally (no transcription, no R2 upload)
+# Usage: just local-notx 3
+local-notx episode *flags:
+    {{ publish_script }} "{{ episode }}" --skip-upload {{ flags }}
 
 # ------------------------------------------------------------
 # Utility recipes
 # ------------------------------------------------------------
 
-# Re-generate chapters from existing transcript in the episode file.
-# Pass --force-chapters to overwrite existing frontmatter chapters without prompting.
-# Usage: just chapters episodes/0042-slug.md
-#        just chapters episodes/0042-slug.md --force-chapters
+# Re-generate chapters from existing transcript in the episode file
+# Usage: just chapters 3
+#        just chapters 3 --force-chapters
 chapters episode *flags:
     {{ publish_script }} "{{ episode }}" --generate-chapters {{ flags }}
 
 # Upload an already-encoded MP3 to R2 (skips encode, no transcription)
-# Usage: just upload episodes/0042-slug.md episode.mp3
+# Usage: just upload episodes/0003.md audio/bitflip-e003.mp3
 upload episode audio:
     {{ publish_script }} "{{ episode }}" "{{ audio }}" --skip-encode
 
 # Show what a publish run would do without making any changes
-# Usage: just dry-run episodes/0042-slug.md recording.flac
-dry-run episode audio:
-    {{ publish_script }} "{{ episode }}" "{{ audio }}" --dry-run
+# Usage: just dry-run 3
+dry-run episode *flags:
+    {{ publish_script }} "{{ episode }}" --dry-run {{ flags }}
