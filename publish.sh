@@ -3,6 +3,7 @@
 # with faster-whisper, uploads to R2, and patches the episode frontmatter.
 #
 # Usage:
+#   ./publish.sh <episode-number> [options]          ← auto-resolves files
 #   ./publish.sh <episode.md> <source-audio> [options]
 #   ./publish.sh <episode.md> --generate-chapters [--force-chapters] [--dry-run]
 #
@@ -38,14 +39,17 @@ MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
 WHISPER_VENV="~/.local/share/bitflip/venv"
-WHISPER_MODEL="large-v3-turbo"   # tiny / base / small / medium / large-v2 / large-v3
-WHISPER_LANG="en"   # Language code (e.g. "en") or "auto" to detect.
-WHISPER_DIARIZE=true   # true to label speakers as Speaker_00, Speaker_01, etc.  Requires a Hugging Face token. Accept model licenses at: https://huggingface.co/pyannote/speaker-diarization-community-1
-WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"   # Local path to a file containing your HF token (one line).
+WHISPER_MODEL="large-v3-turbo"
+WHISPER_LANG="en"
+WHISPER_DIARIZE=true
+WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"
 
-# Claude API — used for chapter generation from transcript
-ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"   # Local path to a file containing your Anthropic API key (one line).
+ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"
 CLAUDE_MODEL="claude-sonnet-4-6"
+
+# Directories used for auto-resolution when an episode number is given
+EPISODES_DIR="episodes"
+AUDIO_DIR="audio"
 
 ########################################
 # Globals
@@ -102,8 +106,6 @@ require() {
   fi
 }
 
-# retry <attempts> <delay_seconds> <command> [args...]
-# Retries a command up to <attempts> times, waiting <delay_seconds> between tries.
 retry() {
   local attempts="$1" delay="$2"
   shift 2
@@ -119,11 +121,55 @@ retry() {
 }
 
 ########################################
+# Episode File Resolution
+########################################
+
+# Called when a bare episode number is given instead of explicit file paths.
+# Searches EPISODES_DIR and AUDIO_DIR and sets MD_FILE and SOURCE_AUDIO.
+resolve_episode_files() {
+  local num="$1"
+  local padded
+  padded=$(printf "%04d" "$(( 10#$num ))")
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  # Find episode markdown: episodes/0003.md
+  local md="${script_dir}/${EPISODES_DIR}/${padded}.md"
+  if [[ ! -f "$md" ]]; then
+    fatal "Episode file not found: ${md}"
+  fi
+  MD_FILE="$md"
+
+  # Find audio: audio/bitflip-e*3.mp3 — accepts any zero-padding
+  local audio_match=""
+  local pattern
+  # Build a glob pattern: bitflip-e*<num>.mp3 — then confirm with regex
+  while IFS= read -r -d '' candidate; do
+    local basename
+    basename=$(basename "$candidate")
+    if [[ "$basename" =~ ^bitflip-e0*${num}\.mp3$ ]]; then
+      audio_match="$candidate"
+      break
+    fi
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.mp3" -print0 2>/dev/null | sort -z)
+
+  if [[ -z "$audio_match" ]]; then
+    fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.mp3"
+  fi
+  SOURCE_AUDIO="$audio_match"
+
+  log "Resolved episode: ${MD_FILE}"
+  log "Resolved audio:   ${SOURCE_AUDIO}"
+}
+
+########################################
 # Argument Parsing
 ########################################
 
 usage() {
-  echo "Usage: $0 <episode.md> <source-audio> [options]"
+  echo "Usage: $0 <episode-number> [options]"
+  echo "       $0 <episode.md> <source-audio> [options]"
   echo "       $0 <episode.md> --generate-chapters [--force-chapters] [--dry-run]"
   echo "Options:"
   echo "  --dry-run             Show what would happen without making changes"
@@ -153,7 +199,12 @@ parse_args() {
       -*) usage ;;
       *)
         if [[ -z "$MD_FILE" ]]; then
-          MD_FILE="$1"
+          # Bare integer → auto-resolve episode files
+          if [[ "$1" =~ ^[0-9]+$ ]]; then
+            resolve_episode_files "$1"
+          else
+            MD_FILE="$1"
+          fi
         elif [[ -z "$SOURCE_AUDIO" ]]; then
           SOURCE_AUDIO="$1"
         else
@@ -174,10 +225,8 @@ parse_args() {
 
   # SOURCE_AUDIO is not required when only generating chapters from an existing transcript
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false && -z "$SOURCE_AUDIO" ]]; then
-    # Set flags so the pipeline skips all audio steps cleanly
     SKIP_ENCODE=true
     SKIP_UPLOAD=true
-    # Provide a dummy value so later guards don't trip on an empty variable
     SOURCE_AUDIO="/dev/null"
   fi
 
@@ -202,7 +251,6 @@ check_dependencies() {
     require rclone
   fi
 
-  # python3 needed for whisper venv bootstrap and for JSON payload/response handling
   if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
     require python3
     require curl
@@ -236,7 +284,6 @@ load_anthropic_api_key() {
   if [[ -f "$key_file" ]]; then
     ANTHROPIC_API_KEY=$(tr -d '[:space:]' < "$key_file")
   else
-    # Fall back to environment variable if file is absent
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
   fi
 
@@ -250,8 +297,6 @@ load_anthropic_api_key() {
 # Markdown Frontmatter Helpers
 ########################################
 
-# sed_inplace: portable in-place sed for both GNU (Linux) and BSD (macOS).
-# Usage: sed_inplace 's/old/new/' file
 sed_inplace() {
   sed -i.bak -e "$1" "$2"
   rm -f "$2.bak"
@@ -269,8 +314,6 @@ fm_get() {
 }
 
 fm_count_array() {
-  # Count items in a YAML array block within frontmatter.
-  # Handles both inline (- item) and the hosts/guests pattern.
   local key="$1"
   awk -v key="$key" '
     /^---$/ { delim++; next }
@@ -290,7 +333,6 @@ fm_set() {
   if grep -q "^${key}:" "$MD_FILE"; then
     sed_inplace "s|^${key}:.*|${key}: ${value}|" "$MD_FILE"
   else
-    # Insert before the closing --- of the frontmatter
     local tmp
     tmp=$(mktemp)
     awk -v key="$key" -v value="$value" '
@@ -304,7 +346,6 @@ fm_set() {
   fi
 }
 
-# fm_has_chapters: returns 0 (true) if a chapters: block exists in frontmatter
 fm_has_chapters() {
   awk '
     /^---$/ {delim++; next}
@@ -314,20 +355,14 @@ fm_has_chapters() {
   ' "$MD_FILE"
 }
 
-# fm_set_chapters: replace or insert the entire chapters: block in frontmatter.
-# Argument: path to a file whose contents are the YAML block to insert,
-# starting with "chapters:" and including all indented list items.
 fm_set_chapters() {
   local chapters_file="$1"
   local tmp block
   tmp=$(mktemp)
-
-  # Slurp the replacement block once — reused in both awk passes below
   block=$(cat "$chapters_file")
 
   awk -v block="$block" '
     /^---$/ { delim++ }
-    # Inside frontmatter: replace the existing chapters block
     delim == 1 && !done {
       if (/^chapters:/) {
         in_chapters = 1
@@ -339,14 +374,13 @@ fm_set_chapters() {
           in_chapters = 0
           done = 1
         } else {
-          next  # skip indented chapter lines
+          next
         }
       }
     }
     { print }
   ' "$MD_FILE" > "$tmp"
 
-  # If chapters: was never found, insert it before the closing --- of the frontmatter
   if ! grep -q "^chapters:" "$tmp"; then
     awk -v block="$block" '
       /^---$/ && NR > 1 && !inserted {
@@ -372,13 +406,12 @@ read_metadata() {
   EPISODE_TITLE=$(fm_get "title")
   EPISODE_DATE=$(fm_get "date")
 
-  # Count speakers from hosts + guests arrays for diarization hints
   local host_count guest_count
   host_count=$(fm_count_array "hosts")
   guest_count=$(fm_count_array "guests")
   EPISODE_SPEAKERS=$(( host_count + guest_count ))
   if [[ "$EPISODE_SPEAKERS" -eq 0 ]]; then
-    EPISODE_SPEAKERS=""  # unknown — let diarization decide
+    EPISODE_SPEAKERS=""
   fi
 
   if [[ -z "$EPISODE_NUM" ]]; then fatal "episodeNumber missing"; fi
@@ -386,7 +419,6 @@ read_metadata() {
   if [[ -z "$EPISODE_DATE" ]]; then fatal "date missing from frontmatter"; fi
 
   EPISODE_NUM_PADDED=$(printf "%04d" "$EPISODE_NUM")
-
   MP3_FILENAME="${EPISODE_DATE}-bitflip-e${EPISODE_NUM_PADDED}.mp3"
 
   log "Episode: #${EPISODE_NUM} - ${EPISODE_TITLE}"
@@ -397,7 +429,6 @@ read_metadata() {
 ########################################
 
 encode_audio() {
-  # Nothing to encode when only generating chapters from an existing transcript
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
     return
   fi
@@ -409,7 +440,6 @@ encode_audio() {
 
   if [[ "$SKIP_ENCODE" == true ]]; then
     log "Skipping encode"
-
     if [[ "$DRY_RUN" == false ]]; then
       ffprobe -v error "$SOURCE_AUDIO" >/dev/null 2>&1 \
         || fatal "Source audio is not a valid media file: $SOURCE_AUDIO"
@@ -419,7 +449,6 @@ encode_audio() {
   fi
 
   local cover_args=()
-
   if [[ -f "$COVER_ART" ]]; then
     cover_args=(-i "$COVER_ART" -map 0:a -map 1:v -c:v mjpeg -pix_fmt yuvj420p)
   fi
@@ -445,9 +474,6 @@ encode_audio() {
 # Transcription
 ########################################
 
-# Environment variables passed to transcribe.py
-# transcribe.py reads: WHISPER_DIARIZE, HF_TOKEN, WHISPER_SPEAKERS
-
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
 
@@ -467,13 +493,6 @@ run_transcription() {
   if [[ ! -f "$venv/bin/python" ]]; then
     log "Creating venv: $venv"
     python3 -m venv "$venv"
-
-    # WhisperX handles transcription, alignment, and diarization in one package.
-    # It pins torch~=2.8.0 and torchaudio~=2.8.0 internally, which are compatible
-    # with ctranslate2's CUDA 12 requirements. torchcodec is uninstalled because
-    # it requires CUDA 13 (libnvrtc.so.13) which is not available on this system —
-    # WhisperX falls back gracefully to its own audio loading when torchcodec
-    # is absent, so this is safe.
     "$venv/bin/pip" install -q whisperx
     "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
   fi
@@ -502,22 +521,16 @@ append_transcript() {
 
   local tmp
   tmp=$(mktemp)
-
   awk '/^## [Tt]ranscript/{exit} {print}' "$MD_FILE" > "$tmp"
-
   echo >> "$tmp"
   echo "## Transcript" >> "$tmp"
   echo >> "$tmp"
-
   cat "$TRANSCRIPT_FILE" >> "$tmp"
-
   mv "$tmp" "$MD_FILE"
 
   log "Transcript appended"
 }
 
-# Extract the ## Transcript section from the episode markdown into a temp file,
-# setting TRANSCRIPT_FILE. Calls fatal if no transcript section is found.
 extract_transcript_from_md() {
   header "Extracting transcript from episode file"
 
@@ -525,7 +538,6 @@ extract_transcript_from_md() {
   tmp=$(mktemp /tmp/transcript.XXXXXX.md)
   CLEANUP_FILES+=("$tmp")
 
-  # Grab everything after the first ## Transcript heading
   awk '/^## [Tt]ranscript/{found=1; next} found{print}' "$MD_FILE" > "$tmp"
 
   if [[ ! -s "$tmp" ]]; then
@@ -554,7 +566,6 @@ generate_chapters_from_transcript() {
     return
   fi
 
-  # Guard: existing chapters in frontmatter
   if fm_has_chapters; then
     if [[ "$FORCE_CHAPTERS" == true ]]; then
       log "Overwriting existing chapters (--force-chapters)"
@@ -582,9 +593,6 @@ generate_chapters_from_transcript() {
     return
   fi
 
-  # Truncate transcript if it would exceed safe Claude input limits.
-  # ~120k chars leaves comfortable headroom below the 200k token context window
-  # when combined with the prompt and expected output.
   local MAX_TRANSCRIPT_CHARS=120000
   local transcript_size
   transcript_size=$(wc -c < "$TRANSCRIPT_FILE")
@@ -597,7 +605,6 @@ generate_chapters_from_transcript() {
     transcript_content=$(cat "$TRANSCRIPT_FILE")
   fi
 
-  # Build the prompt
   local prompt
   prompt="You are a podcast editor. Given the transcript below, identify 8–16 meaningful chapter
 break points. For each chapter, output a YAML list item in exactly this format (no extra text,
@@ -625,7 +632,6 @@ ${transcript_content}"
   response_file=$(mktemp /tmp/bitflip-claude-response.XXXXXX.json)
   CLEANUP_FILES+=("$payload_file" "$response_file")
 
-  # Build JSON payload via python3 (already a dependency) to handle escaping safely
   python3 - "$CLAUDE_MODEL" "$prompt" "$payload_file" <<'PYEOF'
 import json, sys
 model, prompt, out = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -652,14 +658,12 @@ PYEOF
     return
   fi
 
-  # A 200 can still carry an application-level error (e.g. overloaded, invalid request)
   if ! grep -q '"content"' "$response_file"; then
     log "WARNING: Claude response missing 'content' field — skipping chapter generation."
     log "         Response: $(cat "$response_file")"
     return
   fi
 
-  # Extract the text content from the API response
   local raw_yaml
   raw_yaml=$(python3 -c "
 import json, sys
@@ -674,7 +678,6 @@ print(text, end='')
     return
   fi
 
-  # Validate: every line should be blank, a list item, or an indented time/title key
   local invalid_lines
   invalid_lines=$(echo "$raw_yaml" | grep -v '^\s*$' \
     | grep -v '^\s*-\s*$' \
@@ -689,7 +692,6 @@ print(text, end='')
     return
   fi
 
-  # Build the full chapters block to splice into frontmatter
   local chapters_block_file
   chapters_block_file=$(mktemp /tmp/bitflip-chapters-yaml.XXXXXX.txt)
   CLEANUP_FILES+=("$chapters_block_file")
@@ -710,16 +712,13 @@ print(text, end='')
 # Chapters (embed into MP3)
 ########################################
 
-# Convert HH:MM:SS or MM:SS timestamp to milliseconds.
-# HH:MM:SS is required from Claude, but MM:SS is accepted as a fallback
-# to avoid a fatal error if the model slips up.
 ts_to_ms() {
   local ts="$1"
   local h=0 m=0 s=0
   IFS=: read -r -a parts <<< "$ts"
   case "${#parts[@]}" in
     3) h="${parts[0]}"; m="${parts[1]}"; s="${parts[2]}" ;;
-    2) m="${parts[0]}"; s="${parts[1]}" ;;   # MM:SS fallback
+    2) m="${parts[0]}"; s="${parts[1]}" ;;
     *) fatal "Unrecognised chapter timestamp: $ts" ;;
   esac
   h=$(( 10#$h ))
@@ -734,7 +733,6 @@ ts_to_ms() {
 embed_chapters() {
   header "Embedding chapters"
 
-  # No audio to process when running chapter generation only
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
     log "Skipping chapter embedding (no audio file — chapters written to frontmatter only)"
     return
@@ -830,7 +828,6 @@ embed_chapters() {
 ########################################
 
 extract_audio_metadata() {
-
   header "Reading duration and file size"
 
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
@@ -865,7 +862,6 @@ extract_audio_metadata() {
 ########################################
 
 upload_audio() {
-
   header "Uploading to R2"
 
   if [[ "$SKIP_UPLOAD" == true ]]; then
@@ -895,7 +891,6 @@ upload_audio() {
 ########################################
 
 patch_frontmatter() {
-
   header "Updating frontmatter"
 
   if [[ "$DRY_RUN" == true ]]; then
@@ -918,7 +913,6 @@ patch_frontmatter() {
 ########################################
 
 main() {
-
   parse_args "$@"
 
   COVER_ART="${COVER_ART:-$DEFAULT_COVER}"
@@ -933,33 +927,18 @@ main() {
 
   read_metadata
 
-  # Step 1: encode source audio to MP3
   encode_audio
-
-  # Step 2: transcribe (sets TRANSCRIPT_FILE); skipped when only --generate-chapters is set
   run_transcription
-
-  # Step 3: append transcript text to episode markdown
   append_transcript
 
-  # Step 4a: if --generate-chapters without --transcribe, pull transcript from the episode file
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
     extract_transcript_from_md
   fi
 
-  # Step 4b: generate chapter markers from transcript via Claude, write into frontmatter
   generate_chapters_from_transcript
-
-  # Step 5: embed chapters from frontmatter into the MP3
   embed_chapters
-
-  # Step 6: read duration + size from the final MP3
   extract_audio_metadata
-
-  # Step 7: upload to R2 (or save locally)
   upload_audio
-
-  # Step 8: patch audioUrl / audioSize / duration into frontmatter
   patch_frontmatter
 
   echo
