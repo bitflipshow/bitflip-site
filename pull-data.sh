@@ -661,6 +661,18 @@ main() {
   parse_args "$@"
   require curl
   require python3
+  require git
+
+  # Create and switch to episode branch (ep3, ep30, etc.)
+  local branch="ep${EPISODE_NUM}"
+  header "Switching to branch: ${branch}"
+  if git show-ref --quiet "refs/heads/${branch}"; then
+    log "Branch already exists — checking out"
+    git checkout "$branch"
+  else
+    git checkout -b "$branch"
+    log "Branch created"
+  fi
   load_api_key
   if [[ "$SKIP_AUDIO" == false ]]; then
     load_fb_password
