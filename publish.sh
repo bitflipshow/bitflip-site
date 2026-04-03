@@ -17,6 +17,7 @@
 #   --no-chapters         Transcribe but skip Claude chapter generation
 #   --generate-chapters   Generate chapters from existing ## Transcript in the episode file
 #   --force-chapters      Overwrite existing frontmatter chapters without prompting
+#   --open-pr             Commit episode file, push branch, and open a GitHub PR
 #
 # Pipeline (full run):
 #   encode → transcribe → append transcript → generate chapters → embed chapters → upload → patch frontmatter
@@ -51,6 +52,10 @@ CLAUDE_MODEL="claude-sonnet-4-6"
 EPISODES_DIR="episodes"
 AUDIO_DIR="audio"
 
+# GitHub — used for opening pull requests with --open-pr
+GITHUB_TOKEN_FILE="~/.config/bitflip/github_token"   # One line: a token with repo scope
+GITHUB_REPO="bitflipshow/bitflip-site"              # owner/repo
+
 ########################################
 # Globals
 ########################################
@@ -66,6 +71,7 @@ SKIP_CHAPTERS=false
 DO_TRANSCRIBE=false
 DO_GENERATE_CHAPTERS=false
 FORCE_CHAPTERS=false
+OPEN_PR=false
 OUTPUT_FILE=""
 
 EPISODE_NUM=""
@@ -83,6 +89,7 @@ DURATION=""
 
 HF_TOKEN=""
 ANTHROPIC_API_KEY=""
+GITHUB_TOKEN=""
 TRANSCRIPT_FILE=""
 
 CLEANUP_FILES=()
@@ -181,6 +188,7 @@ usage() {
   echo "  --no-chapters         Transcribe but skip Claude chapter generation"
   echo "  --generate-chapters   Generate chapters from existing transcript in the episode markdown"
   echo "  --force-chapters      Overwrite existing frontmatter chapters without prompting"
+  echo "  --open-pr             Commit episode file, push branch, and open a GitHub PR"
   exit 1
 }
 
@@ -194,6 +202,7 @@ parse_args() {
       --no-chapters) SKIP_CHAPTERS=true ;;
       --generate-chapters) DO_GENERATE_CHAPTERS=true ;;
       --force-chapters) FORCE_CHAPTERS=true ;;
+      --open-pr) OPEN_PR=true ;;
       --cover) COVER_ART="$2"; shift ;;
       --output) OUTPUT_FILE="$2"; shift ;;
       -*) usage ;;
@@ -254,6 +263,11 @@ check_dependencies() {
   if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
     require python3
     require curl
+  fi
+
+  if [[ "$OPEN_PR" == true ]]; then
+    require curl
+    require git
   fi
 }
 
@@ -909,6 +923,113 @@ patch_frontmatter() {
 }
 
 ########################################
+# GitHub PR
+########################################
+
+load_github_token() {
+  local token_file="${GITHUB_TOKEN_FILE/#\~/$HOME}"
+
+  if [[ -f "$token_file" ]]; then
+    GITHUB_TOKEN=$(tr -d '[:space:]' < "$token_file")
+  else
+    GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+  fi
+
+  if [[ -z "$GITHUB_TOKEN" ]]; then
+    fatal "No GitHub token found at $token_file. Create a fine-grained token with Contents and Pull Requests permissions (read/write) at https://github.com/settings/tokens"
+  fi
+}
+
+open_pull_request() {
+  if [[ "$OPEN_PR" == false ]]; then return; fi
+
+  header "Opening GitHub PR"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] git commit + push + open PR"
+    return
+  fi
+
+  # Determine the current branch — this should be the episode branch (e.g. ep3)
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD)
+
+  if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+    log "WARNING: currently on ${branch} — skipping PR (run from an episode branch)"
+    return
+  fi
+
+  # Stage and commit only the episode markdown file
+  git add "$MD_FILE"
+
+  # Check if there's anything to commit
+  if git diff --cached --quiet; then
+    log "No changes to commit in ${MD_FILE}"
+  else
+    git commit -m "publish episode ${EPISODE_NUM}"
+    log "Committed: ${MD_FILE}"
+  fi
+
+  # Push the branch
+  git push -u origin "$branch"
+  log "Pushed branch: ${branch}"
+
+  # Build PR body from episode metadata
+  local pr_body
+  pr_body="## Episode ${EPISODE_NUM} — ${EPISODE_TITLE}
+
+**Air Date:** ${EPISODE_DATE}
+
+---
+_Opened automatically via publication script_"
+
+  # Call GitHub API to open the PR
+  local payload_file response_file
+  payload_file=$(mktemp /tmp/bitflip-github-payload.XXXXXX.json)
+  response_file=$(mktemp /tmp/bitflip-github-response.XXXXXX.json)
+  CLEANUP_FILES+=("$payload_file" "$response_file")
+
+  python3 - "$branch" "$EPISODE_NUM" "$pr_body" "$payload_file" <<'PYEOF'
+import json, sys
+branch, num, body, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+payload = {
+    "title": f"Episode {num} Release",
+    "head": branch,
+    "base": "main",
+    "body": body,
+}
+with open(out, "w") as f:
+    json.dump(payload, f)
+PYEOF
+
+  local http_status
+  http_status=$(curl -s -o "$response_file" -w "%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -d @"$payload_file" \
+    "https://api.github.com/repos/${GITHUB_REPO}/pulls")
+
+  if [[ "$http_status" != "201" ]]; then
+    log "WARNING: GitHub API returned HTTP ${http_status} — PR not opened."
+    log "         Response: $(cat "$response_file")"
+    return
+  fi
+
+  local pr_url
+  pr_url=$(python3 -c "
+import json, sys
+with open('${response_file}') as f:
+    data = json.load(f)
+print(data.get('html_url', ''))
+")
+
+  log "PR opened: ${pr_url}"
+  echo "  PR:        ${pr_url}"
+}
+
+########################################
 # Main Pipeline
 ########################################
 
@@ -923,6 +1044,9 @@ main() {
   fi
   if [[ ("$DO_TRANSCRIBE" == true && "$SKIP_CHAPTERS" == false) || "$DO_GENERATE_CHAPTERS" == true ]]; then
     load_anthropic_api_key
+  fi
+  if [[ "$OPEN_PR" == true ]]; then
+    load_github_token
   fi
 
   read_metadata
@@ -940,6 +1064,7 @@ main() {
   extract_audio_metadata
   upload_audio
   patch_frontmatter
+  open_pull_request
 
   echo
 
