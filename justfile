@@ -106,3 +106,8 @@ upload episode audio:
 # Usage: just dry-run 3
 dry-run episode *flags:
     {{ publish_script }} "{{ episode }}" --dry-run {{ flags }}
+
+# Replace Speaker_NN labels in a transcript with real names, then git commit
+# Usage: just fix-speakers 3
+fix-speakers episode:
+    ./fix-speakers.sh "{{ episode }}"
