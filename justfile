@@ -56,11 +56,11 @@ pull-notes episode:
 # local-notx           (no transcription)            (no upload)
 # ------------------------------------------------------------
 
-# transcribe + Claude chapters + R2 upload
+# transcribe + Claude chapters + R2 upload + open GitHub PR
 # Usage: just publish 3
 #        just publish 3 --cover path/to/cover.png
 publish episode *flags:
-    {{ publish_script }} "{{ episode }}" --transcribe {{ flags }}
+    {{ publish_script }} "{{ episode }}" --transcribe --open-pr {{ flags }}
 
 # transcribe (no Claude chapters) + R2 upload
 # Usage: just publish-nochapters 3
