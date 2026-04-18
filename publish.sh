@@ -226,10 +226,12 @@ parse_args() {
     echo "Error: episode file not found: $MD_FILE" >&2; exit 1
   fi
 
-  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false && -z "$SOURCE_AUDIO" ]]; then
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
     SKIP_ENCODE=true
     SKIP_UPLOAD=true
-    SOURCE_AUDIO="/dev/null"
+    if [[ -z "$SOURCE_AUDIO" ]]; then
+      SOURCE_AUDIO="/dev/null"
+    fi
   fi
 
   if [[ -z "$SOURCE_AUDIO" ]]; then
@@ -898,6 +900,11 @@ extract_audio_metadata() {
 
 upload_audio() {
   header "Uploading to R2"
+
+  if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
+    log "Skipping (chapters-only mode)"
+    return
+  fi
 
   if [[ "$SKIP_UPLOAD" == true ]]; then
     local dest="${OUTPUT_FILE:-${AUDIO_DIR}/${MP3_FILENAME}}"
