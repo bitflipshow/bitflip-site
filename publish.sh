@@ -879,7 +879,7 @@ upload_audio() {
   header "Uploading to R2"
 
   if [[ "$SKIP_UPLOAD" == true ]]; then
-    local dest="${OUTPUT_FILE:-$MP3_FILENAME}"
+    local dest="${OUTPUT_FILE:-${AUDIO_DIR}/${MP3_FILENAME}}"
     if [[ "$DRY_RUN" == false ]]; then
       cp "$MP3_TEMP" "$dest"
       log "Saved to: $dest"
@@ -1074,7 +1074,7 @@ main() {
     echo "Done."
     echo "Chapters written to: ${MD_FILE}"
   elif [[ "$SKIP_UPLOAD" == true ]]; then
-    local dest="${OUTPUT_FILE:-$MP3_FILENAME}"
+    local dest="${OUTPUT_FILE:-${AUDIO_DIR}/${MP3_FILENAME}}"
     echo "Done."
     echo "Saved to: ${dest}"
   else
