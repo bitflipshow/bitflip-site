@@ -20,17 +20,17 @@ set -Eeuo pipefail
 # Configuration
 ########################################
 
-OUTLINE_URL="https://outline.komodo-gecko.ts.net"   # Your Outline instance URL (no trailing slash)
-OUTLINE_API_KEY_FILE="~/.config/bitflip/outline_api_key"   # One line: your Outline API token
+OUTLINE_URL="https://outline.komodo-gecko.ts.net"
+OUTLINE_API_KEY_FILE="~/.config/bitflip/outline_api_key"
 
-EPISODES_DIR="episodes"   # Relative to script location
+EPISODES_DIR="episodes"
 
-# FileBrowser — audio file source
-FB_HOST="http://100.104.240.5:8080"          # FileBrowser instance URL (no trailing slash)
-FB_USER="production"                         # FileBrowser username
-FB_PASS_FILE="~/.config/bitflip/fb_password" # One line: FileBrowser password
-FB_REMOTE_DIR="production-audio"             # Remote folder containing episode audio files
-AUDIO_DIR="audio"                            # Local directory to save downloaded audio
+FB_HOST="http://100.104.240.5:8080"
+FB_USER="production"
+FB_PASS_FILE="~/.config/bitflip/fb_password"
+FB_REMOTE_DIR="production-audio"
+FB_RAW_DIR="raw-files"
+AUDIO_DIR="audio"
 
 ########################################
 # Globals
@@ -40,6 +40,7 @@ EPISODE_NUM=""
 EPISODE_NUM_PADDED=""
 OUTLINE_API_KEY=""
 FB_PASS=""
+FB_TOKEN=""
 SKIP_AUDIO=false
 
 ########################################
@@ -93,15 +94,13 @@ parse_args() {
 
 load_api_key() {
   local key_file="${OUTLINE_API_KEY_FILE/#\~/$HOME}"
-
   if [[ -f "$key_file" ]]; then
     OUTLINE_API_KEY=$(tr -d '[:space:]' < "$key_file")
   else
     OUTLINE_API_KEY="${OUTLINE_API_KEY:-}"
   fi
-
   if [[ -z "$OUTLINE_API_KEY" ]]; then
-    fatal "No Outline API key found at $key_file. Create a token at ${OUTLINE_URL}/settings/tokens"
+    fatal "No Outline API key found at $key_file."
   fi
 }
 
@@ -111,15 +110,37 @@ load_api_key() {
 
 load_fb_password() {
   local pass_file="${FB_PASS_FILE/#\~/$HOME}"
-
   if [[ -f "$pass_file" ]]; then
     FB_PASS=$(tr -d '[:space:]' < "$pass_file")
   else
     FB_PASS="${FB_PASS:-}"
   fi
-
   if [[ -z "$FB_PASS" ]]; then
-    fatal "No FileBrowser password found at $pass_file. Add it as a single line to that file."
+    fatal "No FileBrowser password found at $pass_file."
+  fi
+}
+
+########################################
+# FileBrowser Auth (shared token)
+########################################
+
+fb_login() {
+  local auth_tmp
+  auth_tmp=$(mktemp /tmp/fb-auth.XXXXXX.json)
+  python3 - "$FB_USER" "$FB_PASS" "$auth_tmp" <<'PYEOF'
+import json, sys
+user, password, out = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(out, "w") as f:
+    json.dump({"username": user, "password": password}, f)
+PYEOF
+
+  FB_TOKEN=$(curl -sf -X POST "${FB_HOST}/api/login" \
+    -H "Content-Type: application/json" \
+    -d @"$auth_tmp")
+  rm -f "$auth_tmp"
+
+  if [[ -z "$FB_TOKEN" ]]; then
+    fatal "FileBrowser authentication failed."
   fi
 }
 
@@ -127,7 +148,6 @@ load_fb_password() {
 # Outline API
 ########################################
 
-# outline_post <endpoint> <payload-file> → response body
 outline_post() {
   local endpoint="$1" payload_file="$2"
   local http_status response_file
@@ -254,7 +274,6 @@ PYEOF
 # Parse Doc Content
 ########################################
 
-# Extract content of a ## Heading section, stopping at the next ## heading
 extract_section() {
   local content="$1" heading="$2"
   local tmp
@@ -262,7 +281,7 @@ extract_section() {
   echo "$content" > "$tmp"
   python3 - "$heading" "$tmp" <<'PYEOF'
 import sys, re
-heading   = sys.argv[1]
+heading = sys.argv[1]
 with open(sys.argv[2]) as f:
     content = f.read()
 lines = content.splitlines()
@@ -281,8 +300,6 @@ PYEOF
   rm -f "$tmp"
 }
 
-# Extract content of the # Show Notes top-level section
-# Handles plain "# Show Notes" and bold "# **Show Notes**"
 extract_show_notes_section() {
   local content="$1"
   local tmp
@@ -308,7 +325,6 @@ PYEOF
   rm -f "$tmp"
 }
 
-# Extract the fenced code block from a section
 extract_code_block() {
   local content="$1"
   local tmp
@@ -327,7 +343,6 @@ PYEOF
   rm -f "$tmp"
 }
 
-# Parse a simple YAML block into JSON
 parse_yaml_to_json() {
   local content="$1"
   local tmp
@@ -340,15 +355,12 @@ with open(sys.argv[1]) as f:
     content = f.read()
 
 result = {}
-current_key = None   # current top-level key
-current_list = None  # list being built under current_key
+current_key = None
+current_list = None
 
 for line in content.splitlines():
     if not line.strip():
         continue
-
-    # Sub-key of a list item: "    key: value" (4+ spaces, no leading dash)
-    # Applies to chapters (time/title), guests (name/role/link), sponsors (name/url/blurb), etc.
     if current_key is not None and current_list is not None:
         sub = re.match(r"^\s{4,}(\w+):\s*(.*)", line)
         if sub:
@@ -356,17 +368,13 @@ for line in content.splitlines():
                 current_list.append({})
             current_list[-1][sub.group(1)] = sub.group(2).strip().strip('"')
             continue
-
-    # List item starting with "  - " — may be a plain value or start a dict
     if re.match(r"^\s{2,}-\s*", line) and current_key is not None:
         item = re.sub(r"^\s*-\s*", "", line).strip()
         if current_list is None:
             current_list = []
         if not item:
-            # Bare "  - " with nothing after — start a new dict entry
             current_list.append({})
         else:
-            # Inline sub-key: "  - key: value"
             sub = re.match(r"(\w+):\s*(.*)", item)
             if sub:
                 current_list.append({sub.group(1): sub.group(2).strip().strip('"')})
@@ -375,11 +383,8 @@ for line in content.splitlines():
                 if val:
                     current_list.append(val)
         continue
-
-    # Top-level key: value
     m = re.match(r"^(\w+):\s*(.*)", line)
     if m:
-        # Flush previous key
         if current_key is not None and current_list is not None:
             result[current_key] = current_list if current_list else None
         current_key = m.group(1)
@@ -397,7 +402,6 @@ for line in content.splitlines():
                 result[current_key] = val
             current_key = None; current_list = None
 
-# Flush final key
 if current_key is not None and current_list is not None:
     result[current_key] = current_list if current_list else None
 
@@ -416,7 +420,6 @@ build_episode_md() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local episodes_dir="${script_dir}/${EPISODES_DIR}"
 
-  # Write large content to temp files to avoid argv size limits
   local cover_tmp links_tmp transcript_tmp
   cover_tmp=$(mktemp /tmp/outline-cover.XXXXXX.txt)
   links_tmp=$(mktemp /tmp/outline-links.XXXXXX.txt)
@@ -464,7 +467,6 @@ guests      = fm.get("guests") or []
 sponsors    = fm.get("sponsors") or []
 chapters    = fm.get("chapters") or [{"time": "00:00:00", "title": "Intro"}]
 
-# Filename is just the zero-padded episode number
 filename = f"{ep_padded}.md"
 filepath = os.path.join(episodes_dir, filename)
 
@@ -472,7 +474,6 @@ if os.path.exists(filepath):
     print(f"ERROR: {filepath} already exists — delete it first.", file=sys.stderr)
     sys.exit(1)
 
-# Build chapters YAML
 chapters_yaml = ""
 for ch in chapters:
     if isinstance(ch, dict):
@@ -526,13 +527,11 @@ if sponsors:
 
 frontmatter += "---\n"
 
-# Build body
 body_parts = []
 
 if cover_text.strip():
     body_parts.append("## What we cover\n\n" + cover_text.strip())
 
-# Normalise links: strip Outline angle-bracket URLs, blank backslashes, leading bullets
 if links_raw.strip():
     link_lines = []
     for line in links_raw.splitlines():
@@ -571,47 +570,22 @@ PYEOF
 ########################################
 
 fetch_audio() {
-  header "Fetching audio from FileBrowser"
+  header "Fetching production audio from FileBrowser"
 
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local local_audio_dir="${script_dir}/${AUDIO_DIR}"
 
-  # Expected filename: bitflip-e0003.mp3
-  local filename="bitflip-e${EPISODE_NUM_PADDED}.mp3"
-  log "Looking for: bitflip-e*${EPISODE_NUM}.mp3"
-
-  # Authenticate — FileBrowser returns a bare token string
-  local auth_payload auth_tmp
-  auth_tmp=$(mktemp /tmp/fb-auth.XXXXXX.json)
-  python3 - "$FB_USER" "$FB_PASS" "$auth_tmp" <<'PYEOF'
-import json, sys
-user, password, out = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(out, "w") as f:
-    json.dump({"username": user, "password": password}, f)
-PYEOF
-
-  local token
-  token=$(curl -sf -X POST "${FB_HOST}/api/login" \
-    -H "Content-Type: application/json" \
-    -d @"$auth_tmp")
-  rm -f "$auth_tmp"
-
-  if [[ -z "$token" ]]; then
-    fatal "FileBrowser authentication failed. Check FB_HOST, FB_USER, and password."
-  fi
-
-  # List the remote folder
-  local listing
+  # List the production-audio folder
+  local listing listing_tmp match
   listing=$(curl -sf "${FB_HOST}/api/resources/${FB_REMOTE_DIR}/" \
-    -H "X-Auth: ${token}") \
+    -H "X-Auth: ${FB_TOKEN}") \
     || fatal "Could not list FileBrowser folder '${FB_REMOTE_DIR}'."
 
-  # Find the matching filename using Python
-  local listing_tmp match
   listing_tmp=$(mktemp /tmp/fb-listing.XXXXXX.json)
   echo "$listing" > "$listing_tmp"
 
+  # Match bitflip-e(0*)N.wav or .mp3 — accept any zero-padding
   match=$(python3 - "$EPISODE_NUM" "$listing_tmp" <<'PYEOF'
 import json, sys, re
 
@@ -621,36 +595,139 @@ list_file = sys.argv[2]
 with open(list_file) as f:
     data = json.load(f)
 
-# Match bitflip-eN.mp3, bitflip-e0N.mp3, bitflip-e00N.mp3, etc.
-pattern = re.compile(rf"^bitflip-e0*{re.escape(num)}\.mp3$", re.IGNORECASE)
+pattern = re.compile(rf"^bitflip-e0*{re.escape(num)}\.(wav|mp3)$", re.IGNORECASE)
 
 for item in data.get("items", []):
     if not item.get("isDir", True) and pattern.match(item.get("name", "")):
         print(item["name"])
         sys.exit(0)
 
-sys.stderr.write(f"No file matching bitflip-e*{num}.mp3 found\n")
+sys.stderr.write(f"No file matching bitflip-e*{num}.wav/mp3 found\n")
 sys.exit(1)
 PYEOF
   )
   rm -f "$listing_tmp"
 
   if [[ -z "$match" ]]; then
-    fatal "No file matching 'bitflip-e*${EPISODE_NUM}.mp3' found in '${FB_REMOTE_DIR}'."
+    fatal "No file matching 'bitflip-e*${EPISODE_NUM}.wav/mp3' found in '${FB_REMOTE_DIR}'."
   fi
 
-  # Download the file
   mkdir -p "$local_audio_dir"
   local local_file="${local_audio_dir}/${match}"
 
-  log "Downloading to: ${local_file}"
+  log "Downloading: ${match} → ${local_file}"
   curl -sf "${FB_HOST}/api/raw/${FB_REMOTE_DIR}/${match}" \
-    -H "X-Auth: ${token}" \
+    -H "X-Auth: ${FB_TOKEN}" \
     -o "$local_file" \
     || fatal "Failed to download '${match}' from FileBrowser."
 
-  log "Audio saved: ${local_file}"
+  log "Production audio saved: ${local_file}"
   echo "$local_file"
+}
+
+########################################
+# FileBrowser Raw Tracks Fetch
+########################################
+
+fetch_raw_tracks() {
+  header "Fetching raw speaker tracks from FileBrowser"
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local local_tracks_dir="${script_dir}/${AUDIO_DIR}/${EPISODE_NUM_PADDED}"
+
+  # Find the raw-files subdirectory — episode number may have varied padding
+  # so we list raw-files/ and match any directory whose name is numerically
+  # equal to EPISODE_NUM.
+  local dir_listing dir_tmp raw_ep_dir
+  dir_listing=$(curl -sf "${FB_HOST}/api/resources/${FB_RAW_DIR}/" \
+    -H "X-Auth: ${FB_TOKEN}" 2>/dev/null) || {
+    log "WARNING: could not list '${FB_RAW_DIR}/' on FileBrowser — skipping raw tracks."
+    return 0
+  }
+
+  dir_tmp=$(mktemp /tmp/fb-rawdir.XXXXXX.json)
+  echo "$dir_listing" > "$dir_tmp"
+
+  raw_ep_dir=$(python3 - "$EPISODE_NUM" "$dir_tmp" <<'PYEOF'
+import json, sys
+
+num       = int(sys.argv[1])
+list_file = sys.argv[2]
+
+with open(list_file) as f:
+    data = json.load(f)
+
+for item in data.get("items", []):
+    if item.get("isDir", False):
+        try:
+            if int(item["name"]) == num:
+                print(item["name"])
+                sys.exit(0)
+        except (ValueError, KeyError):
+            continue
+
+# No matching directory found
+sys.exit(1)
+PYEOF
+  )
+  rm -f "$dir_tmp"
+
+  if [[ -z "$raw_ep_dir" ]]; then
+    log "WARNING: no raw-files directory found for episode ${EPISODE_NUM} — skipping raw tracks."
+    return 0
+  fi
+
+  log "Found raw-files directory: ${FB_RAW_DIR}/${raw_ep_dir}/"
+
+  # List the episode's raw-files directory
+  local track_listing track_tmp
+  track_listing=$(curl -sf "${FB_HOST}/api/resources/${FB_RAW_DIR}/${raw_ep_dir}/" \
+    -H "X-Auth: ${FB_TOKEN}") \
+    || { log "WARNING: could not list raw tracks directory — skipping."; return 0; }
+
+  track_tmp=$(mktemp /tmp/fb-tracks.XXXXXX.json)
+  echo "$track_listing" > "$track_tmp"
+
+  # Find all track files matching {digits}-{name}.wav/mp3
+  local track_files
+  track_files=$(python3 - "$EPISODE_NUM" "$track_tmp" <<'PYEOF'
+import json, sys, re
+
+num       = sys.argv[1]
+list_file = sys.argv[2]
+
+with open(list_file) as f:
+    data = json.load(f)
+
+pattern = re.compile(r"^\d+-\w+\.(wav|mp3)$", re.IGNORECASE)
+
+for item in data.get("items", []):
+    if not item.get("isDir", True) and pattern.match(item.get("name", "")):
+        print(item["name"])
+PYEOF
+  )
+  rm -f "$track_tmp"
+
+  if [[ -z "$track_files" ]]; then
+    log "WARNING: no track files found in ${FB_RAW_DIR}/${raw_ep_dir}/ — skipping raw tracks."
+    return 0
+  fi
+
+  mkdir -p "$local_tracks_dir"
+
+  local downloaded=0
+  while IFS= read -r track_file; do
+    local local_track="${local_tracks_dir}/${track_file}"
+    log "Downloading track: ${track_file}"
+    curl -sf "${FB_HOST}/api/raw/${FB_RAW_DIR}/${raw_ep_dir}/${track_file}" \
+      -H "X-Auth: ${FB_TOKEN}" \
+      -o "$local_track" \
+      || { log "WARNING: failed to download '${track_file}' — skipping."; continue; }
+    (( downloaded++ )) || true
+  done <<< "$track_files"
+
+  log "${downloaded} track(s) saved to: ${local_tracks_dir}/"
 }
 
 ########################################
@@ -663,7 +740,6 @@ main() {
   require python3
   require git
 
-  # Create and switch to episode branch (ep3, ep30, etc.)
   local branch="ep${EPISODE_NUM}"
   header "Switching to branch: ${branch}"
   if git show-ref --quiet "refs/heads/${branch}"; then
@@ -673,9 +749,11 @@ main() {
     git checkout -b "$branch"
     log "Branch created"
   fi
+
   load_api_key
   if [[ "$SKIP_AUDIO" == false ]]; then
     load_fb_password
+    fb_login
   fi
 
   local doc_id
@@ -689,7 +767,6 @@ main() {
 
   local show_notes
   show_notes=$(extract_show_notes_section "$doc_content")
-
   if [[ -z "$show_notes" ]]; then
     fatal "No '# Show Notes' section found in the Outline doc."
   fi
@@ -707,13 +784,13 @@ main() {
   transcript=$(extract_section "$show_notes" "Transcript")
 
   header "Writing episode file"
-
   local episode_path
   episode_path=$(build_episode_md "$fm_json" "$what_we_cover" "$links" "$transcript")
 
   local audio_path=""
   if [[ "$SKIP_AUDIO" == false ]]; then
     audio_path=$(fetch_audio)
+    fetch_raw_tracks
   fi
 
   echo

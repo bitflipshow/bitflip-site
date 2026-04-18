@@ -131,8 +131,6 @@ retry() {
 # Episode File Resolution
 ########################################
 
-# Called when a bare episode number is given instead of explicit file paths.
-# Searches EPISODES_DIR and AUDIO_DIR and sets MD_FILE and SOURCE_AUDIO.
 resolve_episode_files() {
   local num="$1"
   local padded
@@ -141,28 +139,25 @@ resolve_episode_files() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-  # Find episode markdown: episodes/0003.md
   local md="${script_dir}/${EPISODES_DIR}/${padded}.md"
   if [[ ! -f "$md" ]]; then
     fatal "Episode file not found: ${md}"
   fi
   MD_FILE="$md"
 
-  # Find audio: audio/bitflip-e*3.mp3 — accepts any zero-padding
+  # Find audio: audio/bitflip-e*N.wav or .mp3 — accepts any zero-padding and extension
   local audio_match=""
-  local pattern
-  # Build a glob pattern: bitflip-e*<num>.mp3 — then confirm with regex
   while IFS= read -r -d '' candidate; do
     local basename
     basename=$(basename "$candidate")
-    if [[ "$basename" =~ ^bitflip-e0*${num}\.mp3$ ]]; then
+    if [[ "$basename" =~ ^bitflip-e0*${num}\.(wav|mp3)$ ]]; then
       audio_match="$candidate"
       break
     fi
-  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.mp3" -print0 2>/dev/null | sort -z)
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "bitflip-e*.wav" -o -name "bitflip-e*.mp3" \) -print0 2>/dev/null | sort -z)
 
   if [[ -z "$audio_match" ]]; then
-    fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.mp3"
+    fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
   fi
   SOURCE_AUDIO="$audio_match"
 
@@ -208,7 +203,6 @@ parse_args() {
       -*) usage ;;
       *)
         if [[ -z "$MD_FILE" ]]; then
-          # Bare integer → auto-resolve episode files
           if [[ "$1" =~ ^[0-9]+$ ]]; then
             resolve_episode_files "$1"
           else
@@ -232,7 +226,6 @@ parse_args() {
     echo "Error: episode file not found: $MD_FILE" >&2; exit 1
   fi
 
-  # SOURCE_AUDIO is not required when only generating chapters from an existing transcript
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false && -z "$SOURCE_AUDIO" ]]; then
     SKIP_ENCODE=true
     SKIP_UPLOAD=true
@@ -491,8 +484,6 @@ encode_audio() {
 run_transcription() {
   if [[ "$DO_TRANSCRIBE" == false ]]; then return; fi
 
-  header "Transcribing (local, model: ${WHISPER_MODEL})"
-
   TRANSCRIPT_FILE=$(mktemp /tmp/transcript.XXXXXX.md)
   CLEANUP_FILES+=("$TRANSCRIPT_FILE")
 
@@ -501,27 +492,57 @@ run_transcription() {
     return
   fi
 
-  local venv
+  local venv script_dir
   venv="${WHISPER_VENV/#\~/$HOME}"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
   if [[ ! -f "$venv/bin/python" ]]; then
     log "Creating venv: $venv"
     python3 -m venv "$venv"
+
+    # WhisperX handles transcription, alignment, and diarization in one package.
+    # It pins torch~=2.8.0 and torchaudio~=2.8.0 internally, which are compatible
+    # with ctranslate2's CUDA 12 requirements. torchcodec is uninstalled because
+    # it requires CUDA 13 (libnvrtc.so.13) which is not available on this system —
+    # WhisperX falls back gracefully to its own audio loading when torchcodec
+    # is absent, so this is safe.
     "$venv/bin/pip" install -q whisperx
     "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
   fi
 
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # Check for per-speaker tracks in audio/<episode_num_padded>/
+  # Tracks are downloaded by pull-data.sh from raw-files/ on FileBrowser.
+  local tracks_dir="${script_dir}/${AUDIO_DIR}/${EPISODE_NUM_PADDED}"
+  local track_count=0
+  if [[ -d "$tracks_dir" ]]; then
+    track_count=$(find "$tracks_dir" -maxdepth 1 \( -name "[0-9]*-*.wav" -o -name "[0-9]*-*.mp3" \) 2>/dev/null | wc -l)
+  fi
 
-  WHISPER_DIARIZE="$WHISPER_DIARIZE" \
-  HF_TOKEN="$HF_TOKEN" \
-  WHISPER_SPEAKERS="$EPISODE_SPEAKERS" \
-    "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
-      "$MP3_TEMP" \
-      "$TRANSCRIPT_FILE" \
-      "$WHISPER_MODEL" \
-      "$WHISPER_LANG"
+  if [[ "$track_count" -gt 0 ]]; then
+    header "Transcribing (local, per-track, model: ${WHISPER_MODEL})"
+    log "Found ${track_count} speaker track(s) in ${AUDIO_DIR}/${EPISODE_NUM_PADDED}/"
+    log "Using per-track transcription — no diarization needed"
+
+    WHISPER_MODEL="$WHISPER_MODEL" \
+    WHISPER_LANG="$WHISPER_LANG" \
+      "$venv/bin/python" "$script_dir/scripts/transcribe_tracks.py" \
+        "$tracks_dir" \
+        "$TRANSCRIPT_FILE"
+  else
+    header "Transcribing (local, model: ${WHISPER_MODEL})"
+    if [[ -d "$tracks_dir" ]]; then
+      log "WARNING: tracks directory exists but no track files found — falling back to single-file transcription with diarization"
+    fi
+
+    WHISPER_DIARIZE="$WHISPER_DIARIZE" \
+    HF_TOKEN="$HF_TOKEN" \
+    WHISPER_SPEAKERS="$EPISODE_SPEAKERS" \
+      "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
+        "$MP3_TEMP" \
+        "$TRANSCRIPT_FILE" \
+        "$WHISPER_MODEL" \
+        "$WHISPER_LANG"
+  fi
 }
 
 append_transcript() {
@@ -950,7 +971,6 @@ open_pull_request() {
     return
   fi
 
-  # Determine the current branch — this should be the episode branch (e.g. ep3)
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD)
 
@@ -959,10 +979,8 @@ open_pull_request() {
     return
   fi
 
-  # Stage and commit only the episode markdown file
   git add "$MD_FILE"
 
-  # Check if there's anything to commit
   if git diff --cached --quiet; then
     log "No changes to commit in ${MD_FILE}"
   else
@@ -970,11 +988,9 @@ open_pull_request() {
     log "Committed: ${MD_FILE}"
   fi
 
-  # Push the branch
   git push -u origin "$branch"
   log "Pushed branch: ${branch}"
 
-  # Build PR body from episode metadata
   local pr_body
   pr_body="## Episode ${EPISODE_NUM} — ${EPISODE_TITLE}
 
@@ -983,7 +999,6 @@ open_pull_request() {
 ---
 _Opened automatically via publication script_"
 
-  # Call GitHub API to open the PR
   local payload_file response_file
   payload_file=$(mktemp /tmp/bitflip-github-payload.XXXXXX.json)
   response_file=$(mktemp /tmp/bitflip-github-response.XXXXXX.json)
