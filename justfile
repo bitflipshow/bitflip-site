@@ -87,6 +87,29 @@ local-nochapters episode *flags:
 local-notx episode *flags:
     {{ publish_script }} "{{ episode }}" --skip-upload {{ flags }}
 
+
+# ------------------------------------------------------------
+# Staged publishing (review before release)
+#
+# stage    → encode + transcribe + chapters → saves MP3 to audio/, no upload
+# release  → upload staged MP3 from audio/ + open GitHub PR
+#
+# Workflow:
+#   just stage 3          # do all the work, review transcript + chapters
+#   just fix-speakers 3   # clean up speaker labels
+#   just release 3        # upload + open PR when ready
+# ------------------------------------------------------------
+
+# encode + transcribe + Claude chapters → save MP3 to audio/ for review (no upload)
+# Usage: just stage 3
+stage episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcribe --skip-upload {{ flags }}
+
+# upload staged MP3 from audio/ + open GitHub PR (skips re-encode)
+# Usage: just release 3
+release episode *flags:
+    {{ publish_script }} "{{ episode }}" --skip-encode --open-pr {{ flags }}
+
 # ------------------------------------------------------------
 # Utility recipes
 # ------------------------------------------------------------
