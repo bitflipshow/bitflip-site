@@ -145,16 +145,27 @@ resolve_episode_files() {
   fi
   MD_FILE="$md"
 
-  # Find audio: audio/bitflip-e*N.wav or .mp3 — accepts any zero-padding and extension
   local audio_match=""
+
   while IFS= read -r -d '' candidate; do
     local basename
     basename=$(basename "$candidate")
-    if [[ "$basename" =~ ^bitflip-e0*${num}\.(wav|mp3)$ ]]; then
+    if [[ "$basename" =~ ^(.*-)?bitflip-e0*${num}\.mp3$ ]]; then
       audio_match="$candidate"
       break
     fi
-  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "bitflip-e*.wav" -o -name "bitflip-e*.mp3" \) -print0 2>/dev/null | sort -z)
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.mp3" -o -name "*-bitflip-e*.mp3" -print0 2>/dev/null | sort -z)
+
+  if [[ -z "$audio_match" ]]; then
+    while IFS= read -r -d '' candidate; do
+      local basename
+      basename=$(basename "$candidate")
+      if [[ "$basename" =~ ^(.*-)?bitflip-e0*${num}\.wav$ ]]; then
+        audio_match="$candidate"
+        break
+      fi
+    done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.wav" -o -name "*-bitflip-e*.wav" -print0 2>/dev/null | sort -z)
+  fi
 
   if [[ -z "$audio_match" ]]; then
     fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
@@ -643,8 +654,8 @@ generate_chapters_from_transcript() {
   fi
 
   local prompt
-  prompt="You are a podcast editor. Given the transcript below, identify 8–16 meaningful chapter
-break points. For each chapter, output a YAML list item in exactly this format (no extra text,
+  prompt="You are a podcast editor. Given the transcript below, identify no more than 8 meaningful chapter
+break points.  Less is acceptable. For each chapter, output a YAML list item in exactly this format (no extra text,
 no markdown fences, no commentary — raw YAML only):
 
   - time: \"HH:MM:SS\"
