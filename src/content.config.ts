@@ -1,4 +1,5 @@
 import { defineCollection, z } from "astro:content";
+import { glob } from "astro/loaders";
 
 const chaptersSchema = z
   .array(
@@ -12,7 +13,7 @@ const chaptersSchema = z
   .optional();
 
 const episodes = defineCollection({
-  type: "content",
+  loader: glob({ pattern: "**/*.md", base: "./episodes" }),
   schema: z.object({
     episodeNumber: z.number(),
     title: z.string(),
@@ -57,7 +58,7 @@ const episodes = defineCollection({
 });
 
 const hosts = defineCollection({
-  type: "content",
+  loader: glob({ pattern: "**/*.md", base: "./src/content/hosts" }),
   schema: z.object({
     name: z.string(),
     role: z.string().optional(),

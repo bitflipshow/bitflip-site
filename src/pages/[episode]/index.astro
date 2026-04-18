@@ -2,7 +2,7 @@
 import Base from "../../layouts/Base.astro";
 import AudioPlayer from "../../components/AudioPlayer.astro";
 import TranscriptRenderer from "../../components/TranscriptRenderer.astro";
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 import { formatEpisodeDate } from "../../lib/episodes";
 import { resolveGuestAvatarSrc } from "../../lib/guest-avatars";
 import { SITE } from "../../config";
@@ -12,9 +12,9 @@ export async function getStaticPaths() {
   const allHosts = await getCollection("hosts");
   
   return episodes.map((episode) => {
-    const episodeHostSlugs = episode.data.hosts || [];
-    const episodeHosts = allHosts.filter((host) => 
-      episodeHostSlugs.includes(host.slug)
+    const episodeHostIds = episode.data.hosts || [];
+    const episodeHosts = allHosts.filter((host) =>
+      episodeHostIds.includes(host.id)
     );
     
     return {
@@ -25,7 +25,7 @@ export async function getStaticPaths() {
 }
 
 const { episode, hosts } = Astro.props;
-const { Content } = await episode.render();
+const { Content } = await render(episode);
 const { title, episodeNumber, date, summary, tags, coverImage, guests, sponsors, youtubeUrl } = episode.data;
 const formattedDate = formatEpisodeDate(date);
 const guestsWithAvatarSrc = guests
@@ -138,7 +138,7 @@ const jsonLd = {
             <div class="section-title">Hosts</div>
             <div class="people-grid">
               {hosts.map((host) => (
-                <a href={`/hosts/${host.slug}`} class="person-chip">
+                <a href={`/hosts/${host.id}`} class="person-chip">
                   {host.data.avatar && (
                     <img src={host.data.avatar} alt={host.data.name} class="person-chip-avatar" />
                   )}

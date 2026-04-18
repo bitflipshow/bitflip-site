@@ -1,6 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 
 export async function getStaticPaths() {
   const hosts = await getCollection("hosts");
@@ -8,18 +8,18 @@ export async function getStaticPaths() {
   
   return hosts.map((host) => {
     const episodeCount = episodes.filter((episode) => 
-      (episode.data.hosts || []).includes(host.slug)
+      (episode.data.hosts || []).includes(host.id)
     ).length;
     
     return {
-      params: { slug: host.slug },
+      params: { slug: host.id },
       props: { host, episodeCount },
     };
   });
 }
 
 const { host, episodeCount } = Astro.props;
-const { Content } = await host.render();
+const { Content } = await render(host);
 const { name, role, avatar, social } = host.data;
 
 // Grab first paragraph of markdown body as description

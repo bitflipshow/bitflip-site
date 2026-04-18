@@ -1,15 +1,14 @@
 ---
 // TranscriptRenderer.astro
-// Drop this anywhere after <Content /> on the episode page.
-// It finds the ## Transcript section in the rendered HTML,
-// removes it from the prose flow, and replaces it with a
-// styled collapsible transcript widget.
 ---
 
 <script type="module">
   function initTranscript() {
     const notes = document.querySelector(".detail-notes");
     if (!notes) return;
+
+    // Don't re-init if widget already exists on this page
+    if (document.querySelector(".transcript-section")) return;
 
     // Find the <h2> whose text is "Transcript"
     const headings = notes.querySelectorAll("h2");
@@ -23,7 +22,6 @@
     if (!transcriptHeading) return;
 
     // Collect all sibling nodes that belong to the transcript section
-    // (everything after the heading until the next h2 or end of notes)
     const transcriptNodes = [];
     let node = transcriptHeading.nextElementSibling;
     while (node && node.tagName !== "H2") {
@@ -32,13 +30,8 @@
     }
 
     // Parse speaker lines from the collected nodes.
-    // Source format per paragraph:
-    //   <strong>Speaker</strong>: text\n<em>timestamp</em>
     const cues = [];
     for (const el of transcriptNodes) {
-      // Each rendered markdown paragraph looks like:
-      // <p><strong>Alex</strong>: Some words.\n<em>00:00</em></p>
-      // We walk all <p> children inside (could be directly or wrapped)
       const paras = el.matches("p") ? [el] : Array.from(el.querySelectorAll("p"));
       for (const p of paras) {
         const strong = p.querySelector("strong");
@@ -48,11 +41,8 @@
         const speaker = strong.textContent.trim();
         const timestamp = em ? em.textContent.trim() : null;
 
-        // Text = everything after the <strong> tag, before the <em>
         let text = p.textContent;
-        // Strip speaker name + colon
         text = text.replace(/^[^:]+:\s*/, "");
-        // Strip trailing timestamp
         if (timestamp) text = text.replace(timestamp, "").trim();
         text = text.replace(/\*$/, "").trim();
 
@@ -62,13 +52,13 @@
       }
     }
 
-    if (!cues.length) return; // Nothing parsed, leave as-is
+    if (!cues.length) return;
 
     // Remove original transcript nodes from the DOM
     transcriptHeading.remove();
     for (const el of transcriptNodes) el.remove();
 
-    // Build the widget and append it after the notes/sidebar block when present
+    // Build the widget
     const widget = buildWidget(cues);
     const insertionTarget = notes.closest(".detail-content") || notes;
     insertionTarget.insertAdjacentElement("afterend", widget);
@@ -99,11 +89,10 @@
       }
     }
 
-    // Outer section
     const section = document.createElement("div");
     section.className = "transcript-section";
 
-    // Toggle button
+    // Toggle button — starts CLOSED (aria-expanded="false", body.hidden=true)
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "transcript-toggle";
@@ -123,7 +112,7 @@
     `;
     section.appendChild(toggle);
 
-    // Body
+    // Body — hidden by default
     const body = document.createElement("div");
     body.id = "transcript-body";
     body.className = "transcript-body";
@@ -203,7 +192,7 @@
   }
 
   // Run on first load and after Astro page transitions
-  initTranscript();
+  document.addEventListener("astro:page-load", initTranscript);
   document.addEventListener("astro:after-swap", initTranscript);
 </script>
 
@@ -354,7 +343,6 @@
     background: rgba(255, 255, 255, 0.03);
   }
 
-  /* Alternate very subtle row tinting */
   .transcript-turn:nth-child(even) {
     background: rgba(255, 255, 255, 0.015);
   }
@@ -392,12 +380,12 @@
   }
 
   /* ── Per-speaker accent colours ───────────────── */
-  .speaker-color-0 .turn-speaker { color: #f38b12; }   /* safety orange */
-  .speaker-color-1 .turn-speaker { color: #60a5fa; }   /* blue */
-  .speaker-color-2 .turn-speaker { color: #34d399; }   /* green */
-  .speaker-color-3 .turn-speaker { color: #f472b6; }   /* pink */
-  .speaker-color-4 .turn-speaker { color: #a78bfa; }   /* purple */
-  .speaker-color-5 .turn-speaker { color: #fb923c; }   /* amber */
+  .speaker-color-0 .turn-speaker { color: #f38b12; }
+  .speaker-color-1 .turn-speaker { color: #60a5fa; }
+  .speaker-color-2 .turn-speaker { color: #34d399; }
+  .speaker-color-3 .turn-speaker { color: #f472b6; }
+  .speaker-color-4 .turn-speaker { color: #a78bfa; }
+  .speaker-color-5 .turn-speaker { color: #fb923c; }
 
   @media (max-width: 560px) {
     .transcript-toggle {
