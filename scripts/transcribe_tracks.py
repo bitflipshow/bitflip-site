@@ -49,7 +49,7 @@ if language == "auto":
 # Discover track files
 # --------------------------------------------------
 
-TRACK_PATTERN = re.compile(r"^\d+-(\w+)\.mp3$", re.IGNORECASE)
+TRACK_PATTERN = re.compile(r"^\d+-(\w+)\.(wav|mp3)$", re.IGNORECASE)
 
 tracks = []  # list of (speaker_name, filepath)
 
@@ -72,7 +72,7 @@ for entry in entries:
 
 if not tracks:
     print(f"ERROR: no matching track files found in {audio_dir}")
-    print(f"  Expected pattern: {{number}}-{{name}}.mp3 (e.g. 003-alex.mp3)")
+    print(f"  Expected pattern: {{number}}-{{name}}.wav/mp3 (e.g. 004-alex.wav)")
     sys.exit(1)
 
 print(f"Found {len(tracks)} track(s):")
