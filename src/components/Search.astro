@@ -1,41 +1,31 @@
 ---
-// Search component using Pagefind
+// Search component using Pagefind Component UI (v1.5.0+)
 ---
 
 <div class="search-wrapper">
-  <div id="search"></div>
+  <pagefind-searchbox></pagefind-searchbox>
 </div>
 
-<script is:inline>
-  function initPagefind() {
-    if (window.PagefindUI) {
-      new window.PagefindUI({
-        element: "#search",
-        showImages: false,
-        showSubResults: true,
-        excerptLength: 30,
-      });
-    }
-  }
+<link href="/pagefind/pagefind-component-ui.css" rel="stylesheet" />
 
+<script is:inline>
   function loadPagefind() {
-    if (window.PagefindUI) {
-      // Already loaded, just init
-      initPagefind();
-      return;
-    }
+    if (customElements.get('pagefind-searchbox')) return;
+
     const script = document.createElement('script');
-    script.src = '/pagefind/pagefind-ui.js';
-    script.onload = initPagefind;
+    script.type = 'module';
+    script.src = '/pagefind/pagefind-component-ui.js';
     script.onerror = function() {
-      const searchEl = document.getElementById("search");
-      if (searchEl) {
-        searchEl.innerHTML =
-          '<div style="background: rgba(243,139,18,0.06); border: 1px solid rgba(243,139,18,0.2); border-radius: 14px; padding: 32px; text-align: center; color: var(--steel-300);">' +
-          '<div style="font-size: 1.5rem; margin-bottom: 12px;">🔍</div>' +
-          '<p style="margin: 0 0 8px; font-weight: 600; color: var(--steel-100);">Search unavailable</p>' +
-          '<p style="margin: 0; font-size: 0.9rem; color: var(--steel-400);">Run <code style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px;">astro build</code> first to generate the search index.</p>' +
-          '</div>';
+      const el = document.querySelector('pagefind-search');
+      if (el) {
+        el.insertAdjacentHTML('afterend',
+          '<div class="search-unavailable">' +
+          '<div style="font-size:1.5rem;margin-bottom:12px">🔍</div>' +
+          '<p style="margin:0 0 8px;font-weight:600;color:var(--steel-100)">Search unavailable</p>' +
+          '<p style="margin:0;font-size:0.9rem;color:var(--steel-400)">Run <code style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px">astro build</code> first to generate the search index.</p>' +
+          '</div>'
+        );
+        el.remove();
       }
     };
     document.head.appendChild(script);
@@ -51,115 +41,21 @@
     min-height: 200px;
   }
 
-  /* Override Pagefind's default styles */
-  :global(.pagefind-ui),
-  :global(.pagefind-ui *) {
-    background: transparent !important;
+  .search-unavailable {
+    background: rgba(243, 139, 18, 0.06);
+    border: 1px solid rgba(243, 139, 18, 0.2);
+    border-radius: 14px;
+    padding: 32px;
+    text-align: center;
+    color: var(--steel-300);
   }
 
-  :global(.pagefind-ui__form) {
-    background: transparent !important;
-    position: relative !important;
-  }
-
-  :global(.pagefind-ui__search-input) {
-    background: var(--ink-800) !important;
-    border: 1px solid rgba(243, 139, 18, 0.3) !important;
-    border-radius: var(--radius-md) !important;
-    color: var(--steel-100) !important;
-    padding: 14px 20px 14px 50px !important;
-    font-size: 1rem !important;
-    font-family: var(--font-body) !important;
-    width: 100% !important;
-  }
-
-  :global(.pagefind-ui__search-input::placeholder) {
-    color: var(--steel-500) !important;
-  }
-
-  :global(.pagefind-ui__search-input:focus) {
-    border-color: var(--safety-500) !important;
-    outline: none !important;
-    box-shadow: 0 0 0 3px rgba(243, 139, 18, 0.1) !important;
-  }
-
-  :global(.pagefind-ui__search-clear) {
-    color: var(--steel-400) !important;
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__results-area) {
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__results) {
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__result) {
-    background: rgba(12, 14, 16, 0.6) !important;
-    border: 1px solid rgba(243, 139, 18, 0.2) !important;
-    border-radius: var(--radius-md) !important;
-    padding: 16px !important;
-    margin-bottom: 16px !important;
-  }
-
-  :global(.pagefind-ui__result:hover) {
-    border-color: rgba(243, 139, 18, 0.5) !important;
-    background: rgba(12, 14, 16, 0.8) !important;
-  }
-
-  :global(.pagefind-ui__result-link) {
-    color: var(--steel-100) !important;
-    font-weight: 600 !important;
-    font-size: 1.1rem !important;
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__result-link:hover) {
-    color: var(--safety-500) !important;
-  }
-
-  :global(.pagefind-ui__result-title) {
-    color: var(--steel-100) !important;
-  }
-
-  :global(.pagefind-ui__result-excerpt) {
-    color: var(--steel-300) !important;
-    margin-top: 8px !important;
-    line-height: 1.5 !important;
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__result-title mark),
-  :global(.pagefind-ui__result-excerpt mark) {
-    background-color: rgba(243, 139, 18, 0.3) !important;
-    color: var(--safety-500) !important;
-    font-weight: 600 !important;
-  }
-
-  :global(.pagefind-ui__message) {
-    color: var(--steel-400) !important;
-    text-align: center !important;
-    padding: 20px !important;
-    background: transparent !important;
-  }
-
-  :global(.pagefind-ui__button) {
-    background: var(--safety-500) !important;
-    color: var(--ink-900) !important;
-    border: none !important;
-    border-radius: var(--radius-sm) !important;
-    padding: 8px 16px !important;
-    font-weight: 600 !important;
-  }
-
-  :global(.pagefind-ui__button:hover) {
-    background: var(--safety-600) !important;
-  }
-
-  :global(.pagefind-ui__drawer) {
-    background: var(--ink-800) !important;
-    border: 1px solid rgba(243, 139, 18, 0.2) !important;
+  /* Theme the Component UI to match BitFlip */
+  pagefind-searchbox {
+    --pagefind-ui-primary: var(--safety-500);
+    --pagefind-ui-text: var(--steel-100);
+    --pagefind-ui-background: var(--ink-800);
+    --pagefind-ui-border: rgba(243, 139, 18, 0.3);
+    --pagefind-ui-font: var(--font-body);
   }
 </style>
