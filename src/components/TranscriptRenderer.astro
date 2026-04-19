@@ -191,7 +191,25 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Run on first load and after Astro page transitions
+  // Run on hard page load (direct navigation, Cloudflare, etc.)
+  // Use a small retry loop to handle ClientRouter swap timing races
+  function tryInit(attemptsLeft) {
+    if (document.querySelector(".transcript-section")) return; // already done
+    const notes = document.querySelector(".detail-notes");
+    if (notes) {
+      initTranscript();
+    } else if (attemptsLeft > 0) {
+      setTimeout(() => tryInit(attemptsLeft - 1), 100);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => tryInit(10));
+  } else {
+    tryInit(10);
+  }
+
+  // Run after Astro client-side page transitions
   document.addEventListener("astro:page-load", initTranscript);
   document.addEventListener("astro:after-swap", initTranscript);
 </script>
