@@ -14,7 +14,7 @@ const chaptersSchema = z
   .optional();
 
 const episodes = defineCollection({
-  loader: glob({ pattern: "**/*.md", base: "./episodes" }),
+  loader: glob({ pattern: "**/[^_]*.md", base: "./episodes" }),
   schema: z.object({
     episodeNumber: z.number(),
     title: z.string(),
