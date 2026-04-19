@@ -101,7 +101,13 @@ CLEANUP_FILES=()
 cleanup() {
   [[ "${#CLEANUP_FILES[@]}" -gt 0 ]] && rm -f "${CLEANUP_FILES[@]}" 2>/dev/null || true
 }
+interrupted() {
+  echo "" >&2
+  echo "Interrupted." >&2
+  exit 130
+}
 trap cleanup EXIT
+trap interrupted INT TERM
 
 log() { echo "  $*"; }
 header() { echo; echo ">> $*"; }
@@ -145,28 +151,17 @@ resolve_episode_files() {
   fi
   MD_FILE="$md"
 
+  # Find audio: audio/bitflip-e*4.wav or .mp3 — accepts any zero-padding
   local audio_match=""
-
   while IFS= read -r -d '' candidate; do
     local basename
     basename=$(basename "$candidate")
-    if [[ "$basename" =~ ^(.*-)?bitflip-e0*${num}\.mp3$ ]]; then
+    if [[ "$basename" =~ ^bitflip-e0*${num}\.(wav|mp3)$ ]]; then
       audio_match="$candidate"
       break
     fi
-  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.mp3" -o -name "*-bitflip-e*.mp3" -print0 2>/dev/null | sort -z)
-
-  if [[ -z "$audio_match" ]]; then
-    while IFS= read -r -d '' candidate; do
-      local basename
-      basename=$(basename "$candidate")
-      if [[ "$basename" =~ ^(.*-)?bitflip-e0*${num}\.wav$ ]]; then
-        audio_match="$candidate"
-        break
-      fi
-    done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 -name "bitflip-e*.wav" -o -name "*-bitflip-e*.wav" -print0 2>/dev/null | sort -z)
-  fi
-
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "bitflip-e*.wav" -o -name "bitflip-e*.mp3" \) -print0 2>/dev/null | sort -z)
+  
   if [[ -z "$audio_match" ]]; then
     fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
   fi
@@ -618,15 +613,8 @@ generate_chapters_from_transcript() {
     if [[ "$FORCE_CHAPTERS" == true ]]; then
       log "Overwriting existing chapters (--force-chapters)"
     else
-      echo
-      echo "  WARNING: frontmatter already contains a chapters: block."
-      printf "  Overwrite with Claude-generated chapters? [y/N] "
-      local answer
-      read -r answer
-      if [[ ! "$answer" =~ ^[Yy]$ ]]; then
-        log "Skipping chapter generation."
-        return
-      fi
+      log "WARNING: frontmatter already contains chapters — skipping generation (use --force-chapters to overwrite)"
+      return
     fi
   fi
 
