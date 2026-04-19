@@ -56,6 +56,12 @@ AUDIO_DIR="audio"
 GITHUB_TOKEN_FILE="~/.config/bitflip/github_token"   # One line: a token with repo scope
 GITHUB_REPO="bitflipshow/bitflip-site"              # owner/repo
 
+# FileBrowser
+FB_HOST="http://100.104.240.5:8080"
+FB_USER="production"
+FB_PASS_FILE="~/.config/bitflip/fb_password"
+FB_DEST_DIR="bitflip-episodes"
+
 ########################################
 # Globals
 ########################################
@@ -91,6 +97,7 @@ HF_TOKEN=""
 ANTHROPIC_API_KEY=""
 GITHUB_TOKEN=""
 TRANSCRIPT_FILE=""
+FB_TOKEN=""
 
 CLEANUP_FILES=()
 
@@ -925,6 +932,79 @@ upload_audio() {
     "${R2_REMOTE}:${R2_BUCKET}/${MP3_FILENAME}"
 
   log "Upload complete"
+  upload_to_filebrowser 
+}
+
+########################################
+# FileBrowser
+########################################
+
+load_filebrowser_creds() {
+  local pass_file="${FB_PASS_FILE/#\~/$HOME}"
+  local fb_pass
+  fb_pass=$(tr -d '[:space:]' < "$pass_file" 2>/dev/null || true)
+
+  if [[ -z "$fb_pass" ]]; then
+    log "WARNING: FileBrowser password not found at $pass_file — skipping FileBrowser upload."
+    return
+  fi
+
+  local auth_payload response_file
+  auth_payload=$(python3 -c "
+import json, sys
+print(json.dumps({'username': sys.argv[1], 'password': sys.argv[2]}))
+" "$FB_USER" "$fb_pass")
+
+  response_file=$(mktemp /tmp/bitflip-fb-auth.XXXXXX.json)
+  CLEANUP_FILES+=("$response_file")
+
+  local http_status
+  http_status=$(curl -s -o "$response_file" -w "%{http_code}" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d "$auth_payload" \
+    "${FB_HOST}/api/login")
+
+  if [[ "$http_status" != "200" ]]; then
+    log "WARNING: FileBrowser login failed (HTTP ${http_status}) — skipping FileBrowser upload."
+    return
+  fi
+
+  FB_TOKEN=$(tr -d '"' < "$response_file")
+
+  if [[ -z "$FB_TOKEN" ]]; then
+    log "WARNING: FileBrowser returned empty token — skipping FileBrowser upload."
+  fi
+}
+
+upload_to_filebrowser() {
+  if [[ -z "$FB_TOKEN" ]]; then return; fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] FileBrowser upload to ${FB_DEST_DIR}/${MP3_FILENAME}"
+    return
+  fi
+
+  log "Uploading to FileBrowser (${FB_DEST_DIR}/)..."
+
+  local response_file
+  response_file=$(mktemp /tmp/bitflip-fb-upload.XXXXXX.json)
+  CLEANUP_FILES+=("$response_file")
+
+  local http_status
+  http_status=$(retry 3 5 curl -s -o "$response_file" -w "%{http_code}" \
+    -X POST \
+    -H "X-Auth: ${FB_TOKEN}" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary @"$MP3_TEMP" \
+    "${FB_HOST}/api/resources/${FB_DEST_DIR}/${MP3_FILENAME}?override=true")
+
+  if [[ "$http_status" == "200" || "$http_status" == "204" ]]; then
+    log "FileBrowser upload complete"
+  else
+    log "WARNING: FileBrowser upload failed (HTTP ${http_status})"
+    log "         Response: $(cat "$response_file")"
+  fi
 }
 
 ########################################
@@ -1069,6 +1149,8 @@ main() {
   if [[ "$OPEN_PR" == true ]]; then
     load_github_token
   fi
+
+  load_filebrowser_creds
 
   read_metadata
 
