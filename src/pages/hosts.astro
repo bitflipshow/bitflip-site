@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 
 const hosts = await getCollection("hosts");
 const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -9,8 +9,8 @@ const episodes = await getCollection("episodes", ({ data }) => !data.draft);
 const episodeCounts = new Map<string, number>();
 episodes.forEach((episode) => {
   const episodeHosts = episode.data.hosts || [];
-  episodeHosts.forEach((hostSlug) => {
-    episodeCounts.set(hostSlug, (episodeCounts.get(hostSlug) || 0) + 1);
+  episodeHosts.forEach((hostId) => {
+    episodeCounts.set(hostId, (episodeCounts.get(hostId) || 0) + 1);
   });
 });
 
@@ -22,22 +22,22 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
     <h1 class="page-title">Hosts</h1>
     <div class="host-grid">
       {sortedHosts.map(async (host) => {
-        const { Content } = await host.render();
+        const { Content } = await render(host);
         const { name, role, avatar, social } = host.data;
-        const episodeCount = episodeCounts.get(host.slug) || 0;
+        const episodeCount = episodeCounts.get(host.id) || 0;
         
         return (
           <article class="host-card">
             {avatar && (
               <div class="host-avatar">
-                <a href={`/hosts/${host.slug}`}>
+                <a href={`/hosts/${host.id}`}>
                   <img src={avatar} alt={name} />
                 </a>
               </div>
             )}
             <div class="host-header">
               <div class="host-name">
-                <a href={`/hosts/${host.slug}`}>{name}</a>
+                <a href={`/hosts/${host.id}`}>{name}</a>
               </div>
               {role && <div class="host-role">{role}</div>}
               <div class="host-episode-count">
@@ -47,7 +47,7 @@ const sortedHosts = hosts.sort((a, b) => (a.data.order || 999) - (b.data.order |
             <div class="host-bio host-bio-excerpt">
               <Content />
             </div>
-            <a href={`/hosts/${host.slug}`} class="read-more">
+            <a href={`/hosts/${host.id}`} class="read-more">
               Read more →
             </a>
             {social && (

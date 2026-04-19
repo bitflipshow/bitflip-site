@@ -1,18 +1,20 @@
-import { defineCollection, z } from "astro:content";
+import { defineCollection } from "astro:content";
+import { glob } from "astro/loaders";
+import { z } from "astro/zod";
 
 const chaptersSchema = z
   .array(
     z.object({
       time: z.string(),
       title: z.string(),
-      img: z.string().url().optional(),
-      url: z.string().url().optional(),
+      img: z.url().optional(),
+      url: z.url().optional(),
     })
   )
   .optional();
 
 const episodes = defineCollection({
-  type: "content",
+  loader: glob({ pattern: "**/*.md", base: "./episodes" }),
   schema: z.object({
     episodeNumber: z.number(),
     title: z.string(),
@@ -28,8 +30,8 @@ const episodes = defineCollection({
     duration: z.string(),
     coverImage: z.string().optional().default("/images/podcast-cover-large.png"),
     explicit: z.boolean(),
-    youtubeUrl: z.string().url().optional(),
-    transcriptUrl: z.string().url().optional(),
+    youtubeUrl: z.url().optional(),
+    transcriptUrl: z.url().optional(),
     chapters: chaptersSchema,
     tags: z.array(z.string()).optional(),
     draft: z.boolean().optional().default(false),
@@ -39,7 +41,7 @@ const episodes = defineCollection({
         z.object({
           name: z.string(),
           avatar: z.string().optional(),
-          link: z.string().url().optional(),
+          link: z.url().optional(),
         })
       )
       .optional(),
@@ -47,8 +49,8 @@ const episodes = defineCollection({
       .array(
         z.object({
           name: z.string(),
-          url: z.string().url().optional(),
-          link: z.string().url().optional(),
+          url: z.url().optional(),
+          link: z.url().optional(),
           blurb: z.string().optional(),
         })
       )
@@ -57,7 +59,7 @@ const episodes = defineCollection({
 });
 
 const hosts = defineCollection({
-  type: "content",
+  loader: glob({ pattern: "**/*.md", base: "./src/content/hosts" }),
   schema: z.object({
     name: z.string(),
     role: z.string().optional(),

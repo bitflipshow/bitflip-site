@@ -53,7 +53,7 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
               {chapterItems.length} chapters
             </div>
           )}
-          <div class="player-chapters">
+          <div class="player-chapters" data-chapters-scroll>
             {chapterItems.map((chapter: { time: string; title: string; seconds: number }) => (
               <button class="chapter" type="button" data-seek={chapter.seconds}>
                 <span class="chapter-time">{chapter.time}</span>
@@ -75,6 +75,25 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
   const playButton = root?.querySelector("[data-play]");
   const chapters = root?.querySelectorAll("[data-seek]") ?? [];
 
+  // ── Scroll-aware fade mask on chapter list ──────────────────────────────
+  const chapterScroll = root?.querySelector("[data-chapters-scroll]");
+  if (chapterScroll) {
+    const updateMask = () => {
+      const { scrollTop, scrollHeight, clientHeight } = chapterScroll;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 4;
+      // Only apply the bottom fade when there's more content to scroll to
+      chapterScroll.style.webkitMaskImage = atBottom
+        ? "none"
+        : "linear-gradient(to bottom, black 85%, transparent 100%)";
+      chapterScroll.style.maskImage = atBottom
+        ? "none"
+        : "linear-gradient(to bottom, black 85%, transparent 100%)";
+    };
+    chapterScroll.addEventListener("scroll", updateMask, { passive: true });
+    // Set initial state
+    updateMask();
+  }
+
   // The global audio element lives in the StickyPlayer
   const getAudio = () => document.getElementById("global-audio");
 
@@ -95,24 +114,16 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     }
   };
 
-  // Sync on audio play/pause events
   document.addEventListener("play", syncButton, true);
   document.addEventListener("pause", syncButton, true);
-
-  // Also sync when a different episode starts playing
-  // (so this button reverts to "Play" if another episode is triggered)
   window.addEventListener("bitflip:play", syncButton);
-
-  // Sync initial state in case the page loaded mid-playback
   syncButton();
 
   playButton?.addEventListener("click", () => {
     const audio = getAudio();
     if (isThisEpisodePlaying()) {
-      // This episode is playing — pause it
       audio.pause();
     } else {
-      // Either nothing is playing, or a different episode is — start this one
       window.dispatchEvent(new CustomEvent("bitflip:play", {
         detail: {
           src: root.dataset.src,
@@ -129,11 +140,9 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
       const audio = getAudio();
 
         if (audio && audio.src === root.dataset.src) {
-          // Already the active episode — seek and ensure playing
           window.dispatchEvent(new CustomEvent("bitflip:seek", { detail: { seconds } }));
           audio.play();
         } else {
-        // Different or no episode loaded — start it, then seek once audio is ready
         window.dispatchEvent(new CustomEvent("bitflip:play", {
           detail: {
             src: root.dataset.src,
@@ -177,7 +186,6 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     font-size: 0.9rem;
   }
 
-  /* Chapters wrapper — handles scroll + fade hint */
   .player-chapters-wrap {
     display: flex;
     flex-direction: column;
@@ -200,9 +208,11 @@ const chapterItems = (chapters ?? []).map((chapter: { time: string; title: strin
     gap: 6px;
     max-height: 260px;
     overflow-y: auto;
-    /* Fade out at the bottom to hint at scrollability */
+    /* Initial mask — JS will clear it when scrolled to bottom */
     -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
     mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+    /* Extra bottom padding so the last item isn't hidden by the fade */
+    padding-bottom: 32px;
     padding-right: 4px;
     scrollbar-width: thin;
     scrollbar-color: rgba(243, 139, 18, 0.3) transparent;
