@@ -18,6 +18,7 @@ jobs:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           workingDirectory: worker
+          secretsWorkingDirectory: worker
           secrets: |
             UMAMI_HOST
             UMAMI_WEBSITE_ID
