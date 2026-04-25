@@ -3,6 +3,8 @@ name: Deploy to Cloudflare Pages
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'worker/**'
   workflow_dispatch:
 
 jobs:
@@ -13,16 +15,18 @@ jobs:
       deployments: write
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
       - run: npm ci
       - run: npm run build
-      - uses: cloudflare/pages-action@v1
+
+      - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          projectName: bitflip-site
-          directory: dist
+          command: pages deploy dist --project-name=bitflip-site
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}

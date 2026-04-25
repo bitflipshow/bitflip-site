@@ -1,0 +1,9 @@
+name = "bitflip-audio"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+routes = [{ pattern = "dl.bitflip.show/*", zone_name = "bitflip.show" }]
+
+[[r2_buckets]]
+binding = "AUDIO_BUCKET"
+bucket_name = "bitflip-audio"
