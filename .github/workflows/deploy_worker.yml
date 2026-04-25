@@ -13,15 +13,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: cloudflare/wrangler-action@v3
+      - name: Upload Secrets
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           workingDirectory: worker
-          secretsWorkingDirectory: worker
-          secrets: |
-            UMAMI_HOST
-            UMAMI_WEBSITE_ID
+          command: |
+            secret put UMAMI_HOST --name bitflip-audio
+            secret put UMAMI_WEBSITE_ID --name bitflip-audio
         env:
           UMAMI_HOST: ${{ secrets.UMAMI_HOST }}
           UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: worker
