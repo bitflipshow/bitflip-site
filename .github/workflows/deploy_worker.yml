@@ -22,9 +22,9 @@ jobs:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           workingDirectory: worker
-          command: |
-            secret put UMAMI_HOST --name bitflip-audio <<< "$UMAMI_HOST"
-            secret put UMAMI_WEBSITE_ID --name bitflip-audio <<< "$UMAMI_WEBSITE_ID"
+          preCommands: |
+            echo "$UMAMI_HOST" | npx wrangler secret put UMAMI_HOST --name bitflip-audio
+            echo "$UMAMI_WEBSITE_ID" | npx wrangler secret put UMAMI_WEBSITE_ID --name bitflip-audio
         env:
           UMAMI_HOST: ${{ secrets.UMAMI_HOST }}
           UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
