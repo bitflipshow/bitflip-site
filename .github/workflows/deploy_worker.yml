@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install Wrangler
+        run: npm install -g wrangler@latest
+
       - name: Upload Secrets
         uses: cloudflare/wrangler-action@v3
         with:
@@ -20,8 +23,8 @@ jobs:
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           workingDirectory: worker
           command: |
-            secret put UMAMI_HOST --name bitflip-audio
-            secret put UMAMI_WEBSITE_ID --name bitflip-audio
+            secret put UMAMI_HOST --name bitflip-audio <<< "$UMAMI_HOST"
+            secret put UMAMI_WEBSITE_ID --name bitflip-audio <<< "$UMAMI_WEBSITE_ID"
         env:
           UMAMI_HOST: ${{ secrets.UMAMI_HOST }}
           UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
