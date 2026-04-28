@@ -133,6 +133,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
             <a href="/episodes" aria-current={Astro.url.pathname.startsWith('/episodes') ? 'page' : undefined}>Episodes</a>
             <a href="/hosts" aria-current={Astro.url.pathname === '/hosts' ? 'page' : undefined}>Hosts</a>
             <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
+            <a href="/support" aria-current={Astro.url.pathname === '/support' ? 'page' : undefined}>Support</a>
             <a href="/search" aria-current={Astro.url.pathname === '/search' ? 'page' : undefined}>Search</a>
             <a href={SOCIAL.discord} target="_blank" rel="noopener noreferrer">Discord</a>
 
@@ -148,7 +149,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
           <nav class="footer-links" aria-label="Footer navigation">
             <a href="/about">About</a>
             <a href="/subscribe">Subscribe</a>
-
+            <a href="/support">Support</a>
             <a href="/rss.xml">RSS</a>
           </nav>
         </div>

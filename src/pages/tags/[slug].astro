@@ -6,16 +6,16 @@ import EpisodeCard from "../../components/EpisodeCard.astro";
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
   
-  // Collect all unique tags
   const allTags = new Set<string>();
   episodes.forEach((episode) => {
-    (episode.data.tags || []).forEach((tag) => allTags.add(tag));
+    (episode.data.tags || []).forEach((tag) => allTags.add(tag.toLowerCase()));
   });
   
-  // Create a page for each tag
   return Array.from(allTags).map((tag) => {
     const taggedEpisodes = episodes
-      .filter((episode) => (episode.data.tags || []).includes(tag))
+      .filter((episode) => 
+        (episode.data.tags || []).map(t => t.toLowerCase()).includes(tag)
+      )
       .sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
     
     return {
