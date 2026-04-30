@@ -8,7 +8,8 @@ const episodes = await getCollection("episodes", ({ data }) => !data.draft);
 const tagCounts = new Map<string, number>();
 episodes.forEach((episode) => {
   (episode.data.tags || []).forEach((tag) => {
-    tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+    const normalized = tag.toLowerCase();
+    tagCounts.set(normalized, (tagCounts.get(normalized) || 0) + 1);
   });
 });
 

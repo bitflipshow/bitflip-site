@@ -1,0 +1,221 @@
+---
+import Base from "../layouts/Base.astro";
+import { SOCIAL } from "../config";
+---
+
+<Base title="Support | BitFlip.show" description="BitFlip is an independent podcast. If you get value from the show, consider backing us on Patreon.">
+  <div class="support-page">
+
+    <!-- Hero -->
+    <section class="hero">
+    <h1 class="page-title">Support BitFlip</h1>
+    <div class="hero-card">
+        <p class="hero-body">
+        BitFlip is an independent podcast by four people who care deeply about Linux, homelabs, and the pragmatic side of infrastructure. If you get value from the show, consider backing us on Patreon!
+        </p>
+        <div class="hero-cta">
+        <a href={SOCIAL.patreon} class="button" target="_blank" rel="noopener noreferrer">
+            <i class="fa-brands fa-patreon"></i> Back us on Patreon
+        </a>
+        </div>
+    </div>
+    </section>
+
+    <!-- Tiers -->
+    <section class="tiers-section">
+      <div class="section-label">Supporter tiers</div>
+      <div class="tiers-grid">
+
+        <div class="tier-card">
+          <div class="tier-icon">💾</div>
+          <div class="tier-name">Megabyte</div>
+          <div class="tier-price">
+            <span class="amount">$5</span>
+            <span class="period">/ month</span>
+          </div>
+          <p class="tier-desc">
+            Support the show and help pay for our editor.
+          </p>
+          <a href="https://www.patreon.com/checkout/BitFlip?rid=28411056" class="button outline" target="_blank" rel="noopener noreferrer">
+            <i class="fa-brands fa-patreon"></i> Join tier
+          </a>
+        </div>
+
+        <div class="tier-card">
+          <div class="tier-icon">📀</div>
+          <div class="tier-name">Gigabyte</div>
+          <div class="tier-price">
+            <span class="amount">$10</span>
+            <span class="period">/ month</span>
+          </div>
+          <p class="tier-desc">
+            An uncut extra "episode" every month where you get to "sit in" on our planning meetings.
+          </p>
+          <a href="https://www.patreon.com/checkout/BitFlip?rid=28411066" class="button outline" target="_blank" rel="noopener noreferrer">
+            <i class="fa-brands fa-patreon"></i> Join tier
+          </a>
+        </div>
+
+        <div class="tier-card">
+          <div class="tier-icon">🗄️</div>
+          <div class="tier-name">Terrabyte</div>
+          <div class="tier-price">
+            <span class="amount">$20</span>
+            <span class="period">/ month</span>
+          </div>
+          <p class="tier-desc">
+            You'll get a shoutout in the show itself, plus everything from the lower tiers.
+          </p>
+          <a href="https://www.patreon.com/checkout/BitFlip?rid=28411073" class="button outline" target="_blank" rel="noopener noreferrer">
+            <i class="fa-brands fa-patreon"></i> Join tier
+          </a>
+        </div>
+
+        <div class="tier-card petabyte">
+          <div class="tier-icon">🏆</div>
+          <div class="tier-name">Petabyte</div>
+          <div class="tier-price">
+            <span class="amount">$50</span>
+            <span class="period">/ month</span>
+          </div>
+          <p class="tier-desc">
+            For some reason you just want to throw money at us. You get everything from the lower tiers plus your name on the website forever as a supporter of the show!
+          </p>
+          <a href="https://www.patreon.com/checkout/BitFlip?rid=28411080" class="button outline" target="_blank" rel="noopener noreferrer">
+            <i class="fa-brands fa-patreon"></i> Join tier
+          </a>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</Base>
+
+<style>
+  .support-page {
+    display: grid;
+    gap: 64px;
+    padding-bottom: 40px;
+  }
+  .hero {
+    display: grid;
+    gap: 18px;
+  }
+  .hero-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .hero-body {
+    color: var(--steel-300);
+    font-size: 1rem;
+    line-height: 1.75;
+    margin: 0;
+  }
+  .hero-cta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .section-label {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.78rem;
+    color: var(--steel-500);
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(243, 139, 18, 0.15);
+  }
+  .tiers-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+  }
+  .tier-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .tier-card:hover {
+    border-color: var(--card-border-hover);
+    transform: translateY(-3px);
+  }
+  .tier-icon {
+    font-size: 1.6rem;
+    margin-bottom: 16px;
+  }
+  .tier-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--steel-100);
+    margin-bottom: 6px;
+  }
+  .tier-price {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+  .amount {
+    font-family: var(--font-display);
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--safety-500);
+    line-height: 1;
+  }
+  .period {
+    font-size: 0.8rem;
+    color: var(--steel-500);
+  }
+  .tier-desc {
+    font-size: 0.85rem;
+    color: var(--steel-300);
+    line-height: 1.6;
+    margin-bottom: 16px;
+    flex: 1;
+  }
+  .tier-card .button {
+    width: 100%;
+    justify-content: center;
+    margin-top: auto;
+  }
+  @media (max-width: 1024px) {
+    .tiers-grid {
+      grid-template-columns: repeat(2, 1fr);
+     }
+  }
+  @media (max-width: 640px) {
+    .tiers-grid {
+      grid-template-columns: 1fr;
+    }
+    .hero-cta {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .hero-cta .button {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>

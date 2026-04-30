@@ -85,7 +85,7 @@ const jsonLd = {
       {tags && tags.length > 0 && (
         <div class="detail-tags">
           {tags.map((tag: string) => (
-            <a href={`/tags/${tag}`} class="tag">#{tag}</a>
+            <a href={`/tags/${tag.toLowerCase()}`} class="tag">#{tag}</a>
           ))}
         </div>
       )}
