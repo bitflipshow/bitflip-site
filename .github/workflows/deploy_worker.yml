@@ -32,9 +32,8 @@ jobs:
           echo "$UMAMI_WEBSITE_ID" | wrangler secret put UMAMI_WEBSITE_ID --name bitflip-audio
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          workingDirectory: worker
-          command: deploy worker.js
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: wrangler deploy worker.js --name bitflip-audio
