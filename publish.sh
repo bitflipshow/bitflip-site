@@ -158,17 +158,28 @@ resolve_episode_files() {
   fi
   MD_FILE="$md"
 
-  # Find audio: audio/bitflip-e*4.wav or .mp3 — accepts any zero-padding
+  # Prefer MP3 over WAV when both exist
   local audio_match=""
+  local wav_match=""
   while IFS= read -r -d '' candidate; do
-    local basename
-    basename=$(basename "$candidate")
-    if [[ "$basename" =~ ^bitflip-e0*${num}\.(wav|mp3)$ ]]; then
-      audio_match="$candidate"
-      break
+    local bname ext corename epnum
+    bname=$(basename "$candidate")
+    ext="${bname##*.}"
+    corename="${bname#*bitflip-e}"
+    epnum="${corename%%.*}"
+    if [[ "$epnum" =~ ^[0-9]+$ ]] && [[ "$((10#$epnum))" -eq "$((10#$num))" ]]; then
+      if [[ "$ext" == "mp3" ]]; then
+        audio_match="$candidate"
+        break
+      elif [[ "$ext" == "wav" && -z "$wav_match" ]]; then
+        wav_match="$candidate"
+      fi
     fi
-  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "bitflip-e*.wav" -o -name "bitflip-e*.mp3" \) -print0 2>/dev/null | sort -z)
-  
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "*.wav" -o -name "*.mp3" \) -print0 2>/dev/null | sort -z)
+ 
+ # Fall back to WAV if no MP3 found
+  audio_match="${audio_match:-$wav_match}"
+
   if [[ -z "$audio_match" ]]; then
     fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
   fi
