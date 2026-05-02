@@ -191,27 +191,42 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Run on hard page load (direct navigation, Cloudflare, etc.)
-  // Use a small retry loop to handle ClientRouter swap timing races
-  function tryInit(attemptsLeft) {
-    if (document.querySelector(".transcript-section")) return; // already done
+  function tryInit() {
+    if (document.querySelector(".transcript-section")) return;
     const notes = document.querySelector(".detail-notes");
     if (notes) {
       initTranscript();
-    } else if (attemptsLeft > 0) {
-      setTimeout(() => tryInit(attemptsLeft - 1), 100);
+      return;
     }
+
+    // Fall back to MutationObserver for Firefox where DOM may not be ready
+    const observer = new MutationObserver(() => {
+      const notesEl = document.querySelector(".detail-notes");
+      if (notesEl) {
+        observer.disconnect();
+        initTranscript();
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    // Safety timeout — disconnect after 5s to avoid memory leaks
+    setTimeout(() => observer.disconnect(), 5000);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => tryInit(10));
+  // Run on hard load
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", tryInit);
   } else {
-    tryInit(10);
+    tryInit();
   }
 
   // Run after Astro client-side page transitions
-  document.addEventListener("astro:page-load", initTranscript);
-  document.addEventListener("astro:after-swap", initTranscript);
+  document.addEventListener("astro:page-load", tryInit);
+  document.addEventListener("astro:after-swap", tryInit);
 </script>
 
 <style is:global>
