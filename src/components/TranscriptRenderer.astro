@@ -3,12 +3,15 @@
 ---
 
 <script type="module">
+  // Returns "done"  → stop retrying (success or no transcript on this page)
+  // Returns "retry" → content not ready yet, try again
   function initTranscript() {
     const notes = document.querySelector(".detail-notes");
-    if (!notes) return;
+    // Retry if the container or its rendered content isn't in the DOM yet
+    if (!notes || !notes.firstElementChild) return "retry";
 
-    // Don't re-init if widget already exists on this page
-    if (document.querySelector(".transcript-section")) return;
+    // Already initialized
+    if (document.querySelector(".transcript-section")) return "done";
 
     // Find the <h2> whose text is "Transcript"
     const headings = notes.querySelectorAll("h2");
@@ -19,7 +22,8 @@
         break;
       }
     }
-    if (!transcriptHeading) return;
+    // No transcript section on this page — stop retrying
+    if (!transcriptHeading) return "done";
 
     // Collect all sibling nodes that belong to the transcript section
     const transcriptNodes = [];
@@ -52,7 +56,7 @@
       }
     }
 
-    if (!cues.length) return;
+    if (!cues.length) return "done";
 
     // Remove original transcript nodes from the DOM
     transcriptHeading.remove();
@@ -62,6 +66,7 @@
     const widget = buildWidget(cues);
     const insertionTarget = notes.closest(".detail-content") || notes;
     insertionTarget.insertAdjacentElement("afterend", widget);
+    return "done";
   }
 
   function buildWidget(cues) {
@@ -191,42 +196,28 @@
       .replace(/>/g, "&gt;");
   }
 
-  function tryInit() {
-    if (document.querySelector(".transcript-section")) return;
-    const notes = document.querySelector(".detail-notes");
-    if (notes) {
-      initTranscript();
-      return;
+  // Retries until initTranscript succeeds or gives up.
+  // "retry" means content not ready; "done" means finished or no transcript here.
+  function tryInit(attemptsLeft) {
+    if (initTranscript() === "retry" && attemptsLeft > 0) {
+      setTimeout(() => tryInit(attemptsLeft - 1), 100);
     }
-
-    // Fall back to MutationObserver for Firefox where DOM may not be ready
-    const observer = new MutationObserver(() => {
-      const notesEl = document.querySelector(".detail-notes");
-      if (notesEl) {
-        observer.disconnect();
-        initTranscript();
-      }
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
-    // Safety timeout — disconnect after 5s to avoid memory leaks
-    setTimeout(() => observer.disconnect(), 5000);
   }
 
-  // Run on hard load
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", tryInit);
+  // Initial hard-load: run immediately if parsed, or wait for DOMContentLoaded.
+  // Module scripts are deferred so readyState is rarely 'loading' here, but
+  // the check guards against any browser that executes modules earlier.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => tryInit(20));
   } else {
-    tryInit();
+    tryInit(20);
   }
 
-  // Run after Astro client-side page transitions
-  document.addEventListener("astro:page-load", tryInit);
-  document.addEventListener("astro:after-swap", tryInit);
+  // Astro ClientRouter page transitions — use tryInit so we retry on timing races.
+  // astro:page-load fires after astro:after-swap; listening to both covers
+  // browsers where one fires before content is fully painted.
+  document.addEventListener("astro:page-load", () => tryInit(20));
+  document.addEventListener("astro:after-swap", () => tryInit(20));
 </script>
 
 <style is:global>
