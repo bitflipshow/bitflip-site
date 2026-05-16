@@ -525,16 +525,8 @@ run_transcription() {
   if [[ ! -f "$venv/bin/python" ]]; then
     log "Creating venv: $venv"
     python3 -m venv "$venv"
-
-    # WhisperX handles transcription, alignment, and diarization in one package.
-    # It pins torch~=2.8.0 and torchaudio~=2.8.0 internally, which are compatible
-    # with ctranslate2's CUDA 12 requirements. torchcodec is uninstalled because
-    # it requires CUDA 13 (libnvrtc.so.13) which is not available on this system —
-    # WhisperX falls back gracefully to its own audio loading when torchcodec
-    # is absent, so this is safe.
-    "$venv/bin/pip" install -q whisperx
-    "$venv/bin/pip" uninstall -q -y torchcodec 2>/dev/null || true
   fi
+  "$venv/bin/pip" install -q --upgrade whisperx
 
   # Check for per-speaker tracks in audio/<episode_num_padded>/
   # Tracks are downloaded by pull-data.sh from raw-files/ on FileBrowser.
