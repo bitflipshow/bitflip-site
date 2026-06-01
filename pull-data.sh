@@ -39,7 +39,6 @@ AUDIO_DIR="audio"
 # Nextcloud — public share link audio source
 NC_SHARE_URL_FILE="~/.config/bitflip/nc_share_url" # One line: Nextcloud public share URL
 NC_EPISODES_DIR="Episodes"    # Root folder inside the share containing episode subfolders
-NC_AUDIO_FILE="episode audio.wav"  # Filename of the main mixed audio file
 NC_TRACKS_DIR="transcript"    # Subfolder inside each episode folder containing speaker tracks
 
 ########################################
@@ -889,22 +888,60 @@ fetch_audio_nextcloud() {
 
   log "Found episode directory: ${NC_EPISODES_DIR}/${ep_dir}"
 
-  # Download main audio file
+  # Download main audio file — pick whatever file is in the audio/ subfolder
   header "Fetching main audio from Nextcloud"
 
-  local audio_remote="${NC_EPISODES_DIR}/${ep_dir}/audio/${NC_AUDIO_FILE}"
+  local audio_subdir="${NC_EPISODES_DIR}/${ep_dir}/audio"
+  local audio_entries
+  audio_entries=$(nc_list_dir "$webdav_base" "$token" "$audio_subdir")
+
+  if [[ -z "$audio_entries" ]]; then
+    fatal "No files found in '${audio_subdir}/' on Nextcloud."
+  fi
+
+  local entries_tmp audio_file_tmp
+  entries_tmp=$(mktemp /tmp/nc-audio-entries.XXXXXX.txt)
+  audio_file_tmp=$(mktemp /tmp/nc-audio-pick.XXXXXX.txt)
+  echo "$audio_entries" > "$entries_tmp"
+
+  python3 - "$entries_tmp" "$audio_file_tmp" <<'PYEOF'
+import sys, re
+with open(sys.argv[1]) as f:
+    names = [l.strip() for l in f if l.strip()]
+audio = [n for n in names if re.search(r'\.(wav|mp3)$', n, re.IGNORECASE)]
+if not audio:
+    sys.stderr.write("No .wav or .mp3 file found in audio/ subfolder\n")
+    sys.exit(1)
+if len(audio) > 1:
+    sys.stderr.write(f"WARNING: {len(audio)} audio files found — using '{audio[0]}'.\n")
+with open(sys.argv[2], 'w') as f:
+    f.write(audio[0])
+PYEOF
+
+  local audio_file
+  audio_file=$(cat "$audio_file_tmp")
+  rm -f "$entries_tmp" "$audio_file_tmp"
+
+  if [[ -z "$audio_file" ]]; then
+    fatal "No audio file (.wav or .mp3) found in '${audio_subdir}/'."
+  fi
+
+  local audio_ext
+  audio_ext=$(python3 -c "import sys; print(sys.argv[1].rsplit('.', 1)[-1].lower())" "$audio_file")
+  local audio_local="${local_audio_dir}/bitflip-e${EPISODE_NUM_PADDED}.${audio_ext}"
+
+  local audio_remote="${audio_subdir}/${audio_file}"
   local audio_remote_encoded
   audio_remote_encoded=$(python3 -c "from urllib.parse import quote; print(quote('${audio_remote}', safe='/'))")
-  local audio_local="${local_audio_dir}/bitflip-e${EPISODE_NUM_PADDED}.wav"
 
   mkdir -p "$local_audio_dir"
 
-  log "Downloading: ${NC_AUDIO_FILE} → $(basename "$audio_local")"
+  log "Downloading: ${audio_file} → $(basename "$audio_local")"
   curl -sf \
     -u "${token}:" \
     "${webdav_base}/${audio_remote_encoded}" \
     -o "$audio_local" 2>/dev/null \
-    || fatal "Failed to download '${NC_AUDIO_FILE}' from Nextcloud."
+    || fatal "Failed to download '${audio_file}' from Nextcloud."
 
   log "Audio saved: ${audio_local}"
 
