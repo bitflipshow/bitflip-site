@@ -136,7 +136,7 @@ main() {
   echo
 
   for speaker in "${speakers[@]}"; do
-    printf "  Name for %-12s → " "$speaker"
+    printf "  Name for %-12s → \n" "$speaker"
     local name
     read -r name
     if [[ -z "$name" ]]; then
