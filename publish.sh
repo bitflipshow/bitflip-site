@@ -605,6 +605,140 @@ extract_transcript_from_md() {
 }
 
 ########################################
+# Transcript Correction (Claude)
+########################################
+
+fix_transcript_with_claude() {
+  if [[ "$DO_TRANSCRIBE" == false || -z "$TRANSCRIPT_FILE" ]]; then return; fi
+  if [[ "$DRY_RUN" == true ]]; then
+    log "[dry-run] Claude transcript correction"
+    return
+  fi
+  if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+    log "WARNING: Anthropic API key not available — skipping transcript correction."
+    return
+  fi
+
+  header "Fixing transcript with Claude"
+
+  local corrected_file
+  corrected_file=$(mktemp /tmp/transcript-fixed.XXXXXX.md)
+  CLEANUP_FILES+=("$corrected_file")
+
+  python3 - "$CLAUDE_MODEL" "$ANTHROPIC_API_KEY" "$TRANSCRIPT_FILE" "$corrected_file" <<'PYEOF'
+import json, sys, urllib.request, urllib.error, time
+
+model, api_key, transcript_file, out_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+SYSTEM = """You are a transcript editor for a homelab/self-hosting technology podcast. \
+Fix ONLY obvious ASR (automatic speech recognition) errors — misspelled product names, \
+software names, and proper nouns that the ASR misheard. Do not rewrite or paraphrase. \
+Preserve speaker labels, timestamps, and all conversational wording exactly.
+
+Known corrections to apply (and similar patterns):
+- Unrage / Un-rage → Unraid
+- Limetep / Lymetech → LimeTech
+- Navidrone → Navidrome
+- Wolfin / wolfing / wolfing's → Wolphin / Wolphin's
+- Senspin → Sendspin
+- Plex Amp → PlexAmp
+- Bamboo / bamboo (when referring to the 3D printer brand) → Bambu
+- Vault Warden / vault warden → Vaultwarden
+- Arcasm /Chasm → Kasm
+- Orca Slicer → OrcaSlicer
+- Bazite → Bazzite
+- LXE → LXC
+- SODAR → Sonarr
+- radar → Radarr
+- Proximox → Proxmox
+- rustic → Restic
+
+Return ONLY the corrected text — no commentary, no preamble, no explanation."""
+
+CHUNK_CHARS = 25000
+MAX_TOKENS = 8192
+MAX_RETRIES = 3
+
+def call_claude(chunk):
+    payload = {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "system": SYSTEM,
+        "messages": [{"role": "user", "content": chunk}],
+    }
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode(),
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read())
+    return data.get("content", [{}])[0].get("text", "")
+
+with open(transcript_file) as f:
+    content = f.read()
+
+def make_chunks(text, max_chars):
+    chunks, current, size = [], [], 0
+    for line in text.splitlines(keepends=True):
+        if size + len(line) > max_chars and current:
+            chunks.append(''.join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line)
+    if current:
+        chunks.append(''.join(current))
+    return chunks
+
+chunks = make_chunks(content, CHUNK_CHARS)
+total = len(chunks)
+print(f"  {len(content)} chars, {total} chunk(s)", flush=True)
+
+corrected_parts = []
+for i, chunk in enumerate(chunks, 1):
+    print(f"  Chunk {i}/{total}...", flush=True)
+    last_err = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            text = call_claude(chunk)
+            break
+        except urllib.error.HTTPError as e:
+            last_err = f"HTTP {e.code}: {e.read().decode()}"
+        except Exception as e:
+            last_err = str(e)
+        if attempt < MAX_RETRIES:
+            time.sleep(5)
+    else:
+        print(f"  WARNING: Claude API failed on chunk {i} after {MAX_RETRIES} attempts: {last_err}", flush=True)
+        sys.exit(1)
+    if not text:
+        print(f"  WARNING: Claude returned empty text for chunk {i}", flush=True)
+        sys.exit(1)
+    corrected_parts.append(text)
+
+with open(out_file, "w") as f:
+    f.write(''.join(corrected_parts))
+PYEOF
+
+  local py_exit=$?
+  if [[ $py_exit -ne 0 ]]; then
+    log "WARNING: transcript correction failed — keeping original."
+    return
+  fi
+
+  if [[ -s "$corrected_file" ]]; then
+    cp "$corrected_file" "$TRANSCRIPT_FILE"
+    log "Transcript correction applied"
+  else
+    log "WARNING: corrected transcript was empty — keeping original."
+  fi
+}
+
+########################################
 # Chapter Generation (Claude)
 ########################################
 
@@ -1146,7 +1280,7 @@ main() {
   if [[ "$DO_TRANSCRIBE" == true ]]; then
     load_hf_token
   fi
-  if [[ ("$DO_TRANSCRIBE" == true && "$SKIP_CHAPTERS" == false) || "$DO_GENERATE_CHAPTERS" == true ]]; then
+  if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
     load_anthropic_api_key
   fi
   if [[ "$OPEN_PR" == true ]]; then
@@ -1159,6 +1293,7 @@ main() {
 
   encode_audio
   run_transcription
+  fix_transcript_with_claude
   append_transcript
 
   if [[ "$DO_GENERATE_CHAPTERS" == true && "$DO_TRANSCRIBE" == false ]]; then
