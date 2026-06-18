@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Encodes a distribution-ready MP3, embeds chapters, optionally transcribes
-# with faster-whisper, uploads to R2, and patches the episode frontmatter.
+# Encodes a distribution-ready MP3, embeds chapters, transcribes via WhisperX
+# API, uploads to R2, and patches the episode frontmatter.
 #
 # Usage:
 #   ./publish.sh <episode-number> [options]          ← auto-resolves files
@@ -13,7 +13,7 @@
 #   --skip-encode         Use source audio as-is (must already be an MP3)
 #   --skip-upload         Skip R2 upload; save MP3 locally instead
 #   --output <file>       Local path for saved MP3 (used with --skip-upload)
-#   --transcribe          Transcribe with faster-whisper and generate chapters via Claude
+#   --transcribe          Transcribe via WhisperX API and generate chapters via Claude
 #   --no-chapters         Transcribe but skip Claude chapter generation
 #   --generate-chapters   Generate chapters from existing ## Transcript in the episode file
 #   --force-chapters      Overwrite existing frontmatter chapters without prompting
@@ -39,14 +39,14 @@ DEFAULT_COVER="public/images/podcast-cover-small.png"
 MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
-WHISPER_VENV="~/.local/share/bitflip/venv"
+WHISPER_API_URL="localhost:8200"
+WHISPER_API_KEY="" # optional
 WHISPER_MODEL="large-v3-turbo"
 WHISPER_LANG="en"
-WHISPER_DIARIZE=true
-WHISPER_HF_TOKEN_FILE="~/.config/bitflip/hf_token"
 
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"
 CLAUDE_MODEL="claude-sonnet-4-6"
+SKIP_CLAUDE_FIX=false
 
 # Directories used for auto-resolution when an episode number is given
 EPISODES_DIR="episodes"
@@ -54,7 +54,7 @@ AUDIO_DIR="audio"
 
 # GitHub — used for opening pull requests with --open-pr
 GITHUB_TOKEN_FILE="~/.config/bitflip/github_token"   # One line: a token with repo scope
-GITHUB_REPO="bitflipshow/bitflip-site"              # owner/repo
+GITHUB_REPO="bitflipshow/bitflip-site"               # owner/repo
 
 # FileBrowser
 FB_HOST="http://100.104.240.5:8080"
@@ -93,7 +93,6 @@ AUDIO_SIZE=""
 AUDIO_URL=""
 DURATION=""
 
-HF_TOKEN=""
 ANTHROPIC_API_KEY=""
 GITHUB_TOKEN=""
 TRANSCRIPT_FILE=""
@@ -176,8 +175,8 @@ resolve_episode_files() {
       fi
     fi
   done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "*.wav" -o -name "*.mp3" \) -print0 2>/dev/null | sort -z)
- 
- # Fall back to WAV if no MP3 found
+
+  # Fall back to WAV if no MP3 found
   audio_match="${audio_match:-$wav_match}"
 
   if [[ -z "$audio_match" ]]; then
@@ -203,8 +202,9 @@ usage() {
   echo "  --skip-encode         Use source audio as-is (must already be MP3)"
   echo "  --skip-upload         Skip R2 upload"
   echo "  --output <file>       Save final MP3 to this path (implied by --skip-upload)"
-  echo "  --transcribe          Transcribe and embed in episode markdown; generates chapters via Claude"
+  echo "  --transcribe          Transcribe via WhisperX API; generates chapters via Claude"
   echo "  --no-chapters         Transcribe but skip Claude chapter generation"
+  echo "  --no-claude-fix       Skip Claude transcript correction step"
   echo "  --generate-chapters   Generate chapters from existing transcript in the episode markdown"
   echo "  --force-chapters      Overwrite existing frontmatter chapters without prompting"
   echo "  --open-pr             Commit episode file, push branch, and open a GitHub PR"
@@ -221,6 +221,7 @@ parse_args() {
       --no-chapters) SKIP_CHAPTERS=true ;;
       --generate-chapters) DO_GENERATE_CHAPTERS=true ;;
       --force-chapters) FORCE_CHAPTERS=true ;;
+      --no-claude-fix) SKIP_CLAUDE_FIX=true ;;
       --open-pr) OPEN_PR=true ;;
       --cover) COVER_ART="$2"; shift ;;
       --output) OUTPUT_FILE="$2"; shift ;;
@@ -274,36 +275,21 @@ parse_args() {
 check_dependencies() {
   require ffmpeg
   require ffprobe
+  require curl
+  require python3
 
   if [[ "$SKIP_UPLOAD" == false ]]; then
     require rclone
   fi
 
-  if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
-    require python3
-    require curl
-  fi
-
   if [[ "$OPEN_PR" == true ]]; then
-    require curl
     require git
   fi
-}
 
-########################################
-# HF Token
-########################################
-
-load_hf_token() {
-  local token_file="${WHISPER_HF_TOKEN_FILE/#\~/$HOME}"
-
-  if [[ -f "$token_file" ]]; then
-    HF_TOKEN=$(tr -d '[:space:]' < "$token_file")
-  fi
-
-  if [[ "$WHISPER_DIARIZE" == true && -z "$HF_TOKEN" ]]; then
-    log "WARNING: WHISPER_DIARIZE=true but no HF token found at $token_file"
-    log "         Diarization will be skipped."
+  if [[ "$DO_TRANSCRIBE" == true ]]; then
+    if [[ -z "$WHISPER_API_URL" ]]; then
+      fatal "WHISPER_API_URL is not set. Set it in the config block to point at your WhisperX API server."
+    fi
   fi
 }
 
@@ -518,18 +504,10 @@ run_transcription() {
     return
   fi
 
-  local venv script_dir
-  venv="${WHISPER_VENV/#\~/$HOME}"
+  local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-  if [[ ! -f "$venv/bin/python" ]]; then
-    log "Creating venv: $venv"
-    python3 -m venv "$venv"
-  fi
-  "$venv/bin/pip" install -q --upgrade whisperx
-
   # Check for per-speaker tracks in audio/<episode_num_padded>/
-  # Tracks are downloaded by pull-data.sh from raw-files/ on FileBrowser.
   local tracks_dir="${script_dir}/${AUDIO_DIR}/${EPISODE_NUM_PADDED}"
   local track_count=0
   if [[ -d "$tracks_dir" ]]; then
@@ -537,30 +515,94 @@ run_transcription() {
   fi
 
   if [[ "$track_count" -gt 0 ]]; then
-    header "Transcribing (local, per-track, model: ${WHISPER_MODEL})"
+    header "Transcribing via API (per-track, model: ${WHISPER_MODEL})"
     log "Found ${track_count} speaker track(s) in ${AUDIO_DIR}/${EPISODE_NUM_PADDED}/"
-    log "Using per-track transcription — no diarization needed"
-
-    WHISPER_MODEL="$WHISPER_MODEL" \
-    WHISPER_LANG="$WHISPER_LANG" \
-      "$venv/bin/python" "$script_dir/scripts/transcribe_tracks.py" \
-        "$tracks_dir" \
-        "$TRANSCRIPT_FILE"
+    transcribe_tracks_api "$tracks_dir" "$script_dir"
   else
-    header "Transcribing (local, model: ${WHISPER_MODEL})"
-    if [[ -d "$tracks_dir" ]]; then
-      log "WARNING: tracks directory exists but no track files found — falling back to single-file transcription with diarization"
-    fi
-
-    WHISPER_DIARIZE="$WHISPER_DIARIZE" \
-    HF_TOKEN="$HF_TOKEN" \
-    WHISPER_SPEAKERS="$EPISODE_SPEAKERS" \
-      "$venv/bin/python" "$script_dir/scripts/transcribe.py" \
-        "$MP3_TEMP" \
-        "$TRANSCRIPT_FILE" \
-        "$WHISPER_MODEL" \
-        "$WHISPER_LANG"
+    header "Transcribing via API (single-file, model: ${WHISPER_MODEL})"
+    transcribe_single_api "$script_dir"
   fi
+}
+
+transcribe_single_api() {
+  local script_dir="$1"
+
+  local speaker_args=()
+  if [[ -n "$EPISODE_SPEAKERS" ]]; then
+    speaker_args=(-F "min_speakers=${EPISODE_SPEAKERS}" -F "max_speakers=${EPISODE_SPEAKERS}")
+  fi
+
+  local auth_args=()
+  if [[ -n "$WHISPER_API_KEY" ]]; then
+    auth_args=(-H "Authorization: Bearer ${WHISPER_API_KEY}")
+  fi
+
+  local response_file
+  response_file=$(mktemp /tmp/whisper-response.XXXXXX.json)
+  CLEANUP_FILES+=("$response_file")
+
+  log "POSTing to ${WHISPER_API_URL}..."
+
+  local http_status
+  http_status=$(curl -s -o "$response_file" -w "%{http_code}" \
+    --max-time 1800 \
+    "${auth_args[@]}" \
+    -X POST "${WHISPER_API_URL}/v1/audio/transcriptions" \
+    -F "file=@${MP3_TEMP}" \
+    -F "model=${WHISPER_MODEL}" \
+    -F "language=${WHISPER_LANG}" \
+    -F "diarize=true" \
+    -F "align=true" \
+    -F "response_format=verbose_json" \
+    "${speaker_args[@]}")
+
+  if [[ "$http_status" != "200" ]]; then
+    fatal "WhisperX API returned HTTP ${http_status}: $(cat "$response_file")"
+  fi
+
+  python3 "${script_dir}/scripts/whisperx_api_to_md.py" "$response_file" "$TRANSCRIPT_FILE"
+}
+
+transcribe_tracks_api() {
+  local tracks_dir="$1"
+  local script_dir="$2"
+
+  local auth_args=()
+  if [[ -n "$WHISPER_API_KEY" ]]; then
+    auth_args=(-H "Authorization: Bearer ${WHISPER_API_KEY}")
+  fi
+
+  local json_dir
+  json_dir=$(mktemp -d /tmp/whisper-tracks.XXXXXX)
+  CLEANUP_FILES+=("$json_dir")
+
+  local track
+  while IFS= read -r -d '' track; do
+    local bname speaker out_file http_status
+    bname=$(basename "$track")
+    speaker=$(echo "$bname" | sed 's/^[0-9]*-//;s/\.[^.]*$//' | \
+              awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+    out_file="${json_dir}/${speaker}.json"
+
+    log "  Transcribing track: ${speaker} (${bname})"
+
+    http_status=$(curl -s -o "$out_file" -w "%{http_code}" \
+      --max-time 1800 \
+      "${auth_args[@]}" \
+      -X POST "${WHISPER_API_URL}/v1/audio/transcriptions" \
+      -F "file=@${track}" \
+      -F "model=${WHISPER_MODEL}" \
+      -F "language=${WHISPER_LANG}" \
+      -F "diarize=false" \
+      -F "align=true" \
+      -F "response_format=verbose_json")
+
+    if [[ "$http_status" != "200" ]]; then
+      fatal "WhisperX API returned HTTP ${http_status} for track ${bname}: $(cat "$out_file")"
+    fi
+  done < <(find "$tracks_dir" -maxdepth 1 \( -name "[0-9]*-*.wav" -o -name "[0-9]*-*.mp3" \) -print0 | sort -z)
+
+  python3 "${script_dir}/scripts/whisperx_tracks_api_to_md.py" "$json_dir" "$TRANSCRIPT_FILE"
 }
 
 append_transcript() {
@@ -610,6 +652,10 @@ extract_transcript_from_md() {
 
 fix_transcript_with_claude() {
   if [[ "$DO_TRANSCRIBE" == false || -z "$TRANSCRIPT_FILE" ]]; then return; fi
+  if [[ "$SKIP_CLAUDE_FIX" == true ]]; then
+    log "Skipping Claude transcript correction (--no-claude-fix)"
+    return
+  fi
   if [[ "$DRY_RUN" == true ]]; then
     log "[dry-run] Claude transcript correction"
     return
@@ -1069,7 +1115,7 @@ upload_audio() {
     "${R2_REMOTE}:${R2_BUCKET}/${MP3_FILENAME}"
 
   log "Upload complete"
-  upload_to_filebrowser 
+  upload_to_filebrowser
 }
 
 ########################################
@@ -1277,9 +1323,7 @@ main() {
   COVER_ART="${COVER_ART:-$DEFAULT_COVER}"
 
   check_dependencies
-  if [[ "$DO_TRANSCRIBE" == true ]]; then
-    load_hf_token
-  fi
+
   if [[ "$DO_TRANSCRIBE" == true || "$DO_GENERATE_CHAPTERS" == true ]]; then
     load_anthropic_api_key
   fi
