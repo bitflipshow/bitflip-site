@@ -156,6 +156,154 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
       </footer>
     </main>
     {!hidePlayer && <StickyPlayer />}
+    <script>
+      function transcriptInitPage(): "done" | "retry" {
+        const notes = document.querySelector(".detail-notes");
+        if (!notes) return "done";
+        if (!notes.firstElementChild) return "retry";
+        if (document.querySelector(".transcript-section")) return "done";
+
+        const headings = notes.querySelectorAll("h2");
+        let transcriptHeading: Element | null = null;
+        for (const h of headings) {
+          if (h.textContent!.trim().toLowerCase() === "transcript") {
+            transcriptHeading = h;
+            break;
+          }
+        }
+        if (!transcriptHeading) return "done";
+
+        const transcriptNodes: Element[] = [];
+        let node = transcriptHeading.nextElementSibling;
+        while (node && node.tagName !== "H2") {
+          transcriptNodes.push(node);
+          node = node.nextElementSibling;
+        }
+
+        interface Cue { speaker: string; text: string; timestamp: string | null }
+        const cues: Cue[] = [];
+        for (const el of transcriptNodes) {
+          const paras = el.matches("p") ? [el] : Array.from(el.querySelectorAll("p"));
+          for (const p of paras) {
+            const strong = p.querySelector("strong");
+            const em = p.querySelector("em");
+            if (!strong) continue;
+            const speaker = strong.textContent!.trim();
+            const timestamp = em ? em.textContent!.trim() : null;
+            let text = p.textContent!;
+            text = text.replace(/^[^:]+:\s*/, "");
+            if (timestamp) text = text.replace(timestamp, "").trim();
+            text = text.replace(/\*$/, "").trim();
+            if (speaker && text) cues.push({ speaker, text, timestamp });
+          }
+        }
+        if (!cues.length) return "done";
+
+        transcriptHeading.remove();
+        for (const el of transcriptNodes) el.remove();
+        notes.insertAdjacentElement("afterend", buildTranscriptWidget(cues));
+        return "done";
+      }
+
+      interface Turn { speaker: string; timestamp: string | null; lines: string[] }
+      function buildTranscriptWidget(cues: { speaker: string; text: string; timestamp: string | null }[]): HTMLElement {
+        const turns: Turn[] = [];
+        for (const cue of cues) {
+          const last = turns[turns.length - 1];
+          if (last && last.speaker === cue.speaker && !cue.timestamp) {
+            last.lines.push(cue.text);
+          } else {
+            turns.push({ speaker: cue.speaker, timestamp: cue.timestamp, lines: [cue.text] });
+          }
+        }
+        const speakerMap = new Map<string, number>();
+        let colorIdx = 0;
+        for (const t of turns) {
+          if (!speakerMap.has(t.speaker)) speakerMap.set(t.speaker, colorIdx++ % 6);
+        }
+
+        const section = document.createElement("div");
+        section.className = "transcript-section";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "transcript-toggle";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.setAttribute("aria-controls", "transcript-body");
+        toggle.innerHTML =
+          '<span class="transcript-toggle-left">' +
+          '<i class="fa-solid fa-file-lines transcript-icon"></i>' +
+          '<span class="transcript-label">' +
+          '<span class="transcript-title">Transcript</span>' +
+          '<span class="transcript-subtitle">' + turns.length + " speaker turns</span>" +
+          "</span></span>" +
+          '<span class="transcript-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>';
+        section.appendChild(toggle);
+
+        const body = document.createElement("div");
+        body.id = "transcript-body";
+        body.className = "transcript-body";
+        body.hidden = true;
+
+        const toolbar = document.createElement("div");
+        toolbar.className = "transcript-toolbar";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "transcript-tool-btn";
+        copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
+        toolbar.appendChild(copyBtn);
+        body.appendChild(toolbar);
+
+        const content = document.createElement("div");
+        content.className = "transcript-content";
+        const dialogue = document.createElement("div");
+        dialogue.className = "transcript-dialogue";
+        for (const turn of turns) {
+          const row = document.createElement("div");
+          row.className = "transcript-turn speaker-color-" + speakerMap.get(turn.speaker);
+          const meta = document.createElement("div");
+          meta.className = "turn-meta";
+          meta.innerHTML =
+            '<span class="turn-speaker">' + escHtml(turn.speaker) + "</span>" +
+            (turn.timestamp ? '<span class="turn-ts">' + escHtml(turn.timestamp) + "</span>" : "");
+          const textWrap = document.createElement("div");
+          textWrap.className = "turn-text";
+          textWrap.textContent = turn.lines.join(" ");
+          row.appendChild(meta);
+          row.appendChild(textWrap);
+          dialogue.appendChild(row);
+        }
+        content.appendChild(dialogue);
+        body.appendChild(content);
+        section.appendChild(body);
+
+        copyBtn.addEventListener("click", () => {
+          const plain = turns.map(t => "[" + (t.timestamp || "") + "] " + t.speaker + ": " + t.lines.join(" ")).join("\n\n");
+          navigator.clipboard.writeText(plain).then(() => {
+            copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+            setTimeout(() => { copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy'; }, 2000);
+          }).catch(() => {});
+        });
+
+        toggle.addEventListener("click", () => {
+          const open = toggle.getAttribute("aria-expanded") === "true";
+          toggle.setAttribute("aria-expanded", String(!open));
+          body.hidden = open;
+        });
+
+        return section;
+      }
+
+      function escHtml(s: string) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function tryTranscriptInit(n: number) {
+        if (transcriptInitPage() === "retry" && n > 0) setTimeout(() => tryTranscriptInit(n - 1), 100);
+      }
+
+      document.addEventListener("astro:page-load", () => tryTranscriptInit(20));
+    </script>
     <script is:inline>
       function initNav() {
         const toggle = document.querySelector('.nav-toggle');
