@@ -45,7 +45,7 @@ WHISPER_MODEL="large-v3-turbo"
 WHISPER_LANG="en"
 
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"
-CLAUDE_MODEL="claude-sonnet-4-6"
+CLAUDE_MODEL="claude-haiku-4-5"
 SKIP_CLAUDE_FIX=false
 
 # Directories used for auto-resolution when an episode number is given
