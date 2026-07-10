@@ -31,7 +31,7 @@ set -Eeuo pipefail
 # Configuration
 ########################################
 
-R2_REMOTE="r2"
+R2_REMOTE="release-audio"
 R2_BUCKET="bitflip-audio"
 PUBLIC_AUDIO_URL="https://audio.bitflip.show"
 
