@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Fetches episode data from Outline and FileBrowser, creating the episode
-# markdown file and downloading the audio file ready for publishing.
+# Fetches episode data from Outline and R2 (or FileBrowser), creating the
+# episode markdown file and downloading the audio file ready for publishing.
 #
 # Finds the Outline doc by episode number, extracts frontmatter and show
 # notes, writes episodes/NNNN.md, then downloads the matching audio file
-# from FileBrowser into the local audio directory.
+# and speaker tracks into the local audio directory.
 #
 # Usage:
 #   ./pull-data.sh <episode-number> [--skip-audio]
@@ -12,7 +12,7 @@
 #   ./pull-data.sh 42 --skip-audio
 #
 # Requirements:
-#   curl, python3
+#   curl, python3, rclone (for AUDIO_SOURCE=r2)
 
 set -Eeuo pipefail
 
@@ -25,8 +25,8 @@ OUTLINE_API_KEY_FILE="~/.config/bitflip/outline_api_key"
 
 EPISODES_DIR="episodes"
 
-# Audio source — "filebrowser" or "nextcloud"
-AUDIO_SOURCE="nextcloud"
+# Audio source — "filebrowser" or "r2"
+AUDIO_SOURCE="r2"
 
 # FileBrowser — audio file source
 FB_HOST="http://100.104.240.5:8080"
@@ -36,10 +36,12 @@ FB_REMOTE_DIR="audio-production"
 FB_RAW_DIR="audio-transcript"
 AUDIO_DIR="audio"
 
-# Nextcloud — public share link audio source
-NC_SHARE_URL_FILE="~/.config/bitflip/nc_share_url" # One line: Nextcloud public share URL
-NC_EPISODES_DIR="Episodes"    # Root folder inside the share containing episode subfolders
-NC_TRACKS_DIR="transcript"    # Subfolder inside each episode folder containing speaker tracks
+# R2 (via rclone) — audio source
+R2_REMOTE="production-audio"  # rclone remote name (from rclone config)
+R2_BUCKET="recorded-files"    # R2 bucket name
+R2_BASE_DIR="PodBooth"        # Folder inside the bucket containing "Episode N" subfolders
+R2_FULL_DIR="production/full"         # Subfolder holding the full episode audio
+R2_SPEAKERS_DIR="production/speakers" # Subfolder holding per-speaker tracks
 
 ########################################
 # Globals
@@ -50,7 +52,6 @@ EPISODE_NUM_PADDED=""
 OUTLINE_API_KEY=""
 FB_PASS=""
 FB_TOKEN=""
-NC_SHARE_URL=""
 SKIP_AUDIO=false
 
 ########################################
@@ -127,22 +128,6 @@ load_fb_password() {
   fi
   if [[ -z "$FB_PASS" ]]; then
     fatal "No FileBrowser password found at $pass_file."
-  fi
-}
-
-########################################
-# Load Nextcloud Share URL
-########################################
-
-load_nc_share_url() {
-  local url_file="${NC_SHARE_URL_FILE/#\~/$HOME}"
-  if [[ -f "$url_file" ]]; then
-    NC_SHARE_URL=$(tr -d '[:space:]' < "$url_file")
-  else
-    NC_SHARE_URL="${NC_SHARE_URL:-}"
-  fi
-  if [[ -z "$NC_SHARE_URL" ]]; then
-    fatal "No Nextcloud share URL found at $url_file."
   fi
 }
 
@@ -747,95 +732,30 @@ PYEOF
 }
 
 ########################################
-# Nextcloud Audio Fetch
+# R2 Audio Fetch (via rclone)
 ########################################
 
-# Extract the share token from a Nextcloud public share URL
-# e.g. https://cloud.example.com/s/AbCdEfGh → AbCdEfGh
-nc_share_token() {
-  python3 -c "
-import sys, re
-url = '${NC_SHARE_URL}'
-m = re.search(r'/s/([A-Za-z0-9]+)', url)
-if m:
-    print(m.group(1))
-else:
-    sys.stderr.write('Could not extract share token from NC_SHARE_URL\n')
-    sys.exit(1)
-"
-}
-
-# Build the WebDAV base URL from the share URL
-# e.g. https://cloud.example.com/s/AbCdEfGh → https://cloud.example.com/public.php/webdav
-nc_webdav_url() {
-  python3 -c "
-import sys, re
-url = '${NC_SHARE_URL}'
-m = re.match(r'(https?://[^/]+)', url)
-if m:
-    print(m.group(1) + '/public.php/webdav')
-else:
-    sys.stderr.write('Could not parse NC_SHARE_URL\n')
-    sys.exit(1)
-"
-}
-
-# List a Nextcloud WebDAV directory; returns newline-separated filenames.
-# Prints nothing and returns 0 on failure (caller handles warnings).
-nc_list_dir() {
-  local webdav_base="$1" token="$2" path="$3"
-
-  local response
-  response=$(curl -sf \
-    -X PROPFIND \
-    -H "Depth: 1" \
-    -u "${token}:" \
-    "${webdav_base}/${path}" 2>/dev/null) || { echo ""; return 0; }
-
-  local response_tmp
-  response_tmp=$(mktemp /tmp/nc-propfind.XXXXXX.xml)
-  echo "$response" > "$response_tmp"
-
-  python3 - "$path" "$response_tmp" <<'PYEOF'
-import sys, re
-from urllib.parse import unquote
+# List entries in a bucket path; one name per line, dirs and files.
+# Prints nothing on failure (caller handles warnings).
+r2_list_dir() {
+  local path="$1"
+  rclone lsjson "${R2_REMOTE}:${R2_BUCKET}/${path}" 2>/dev/null \
+    | python3 -c "
+import json, sys
 try:
-    import xml.etree.ElementTree as ET
-except ImportError:
+    items = json.load(sys.stdin)
+except json.JSONDecodeError:
     sys.exit(0)
-
-base_path   = sys.argv[1].rstrip("/")
-resp_file   = sys.argv[2]
-
-with open(resp_file) as f:
-    xml_data = f.read()
-
-if not xml_data.strip():
-    sys.exit(0)
-
-try:
-    root = ET.fromstring(xml_data)
-except ET.ParseError:
-    sys.exit(0)
-
-ns = {"d": "DAV:"}
-for resp in root.findall("d:response", ns):
-    href = unquote(resp.findtext("d:href", "", ns)).rstrip("/")
-    name = href.split("/")[-1]
-    if name and not href.endswith(base_path):
-        print(name)
-PYEOF
-
-  rm -f "$response_tmp"
+for item in items:
+    print(item.get('Name', ''))
+" || true
 }
 
-# Find the episode subdirectory inside NC_EPISODES_DIR.
-# Accepts any zero-padding: 4, 04, 004 all match episode 4.
-nc_find_episode_dir() {
-  local webdav_base="$1" token="$2"
-
+# Find the episode subdirectory inside R2_BASE_DIR.
+# Matches 'Episode 10', 'Episode 010', 'Episode 0010', etc.
+r2_find_episode_dir() {
   local entries
-  entries=$(nc_list_dir "$webdav_base" "$token" "$NC_EPISODES_DIR")
+  entries=$(r2_list_dir "$R2_BASE_DIR")
 
   if [[ -z "$entries" ]]; then
     echo ""
@@ -843,22 +763,20 @@ nc_find_episode_dir() {
   fi
 
   local entries_tmp
-  entries_tmp=$(mktemp /tmp/nc-episodes.XXXXXX.txt)
+  entries_tmp=$(mktemp /tmp/r2-episodes.XXXXXX.txt)
   echo "$entries" > "$entries_tmp"
 
   python3 - "$EPISODE_NUM" "$entries_tmp" <<'PYEOF' || true
-import sys
+import sys, re
 
 num = int(sys.argv[1])
 with open(sys.argv[2]) as f:
     for line in f:
         name = line.strip()
-        try:
-            if int(name) == num:
-                print(name)
-                sys.exit(0)
-        except ValueError:
-            continue
+        m = re.match(r"^Episode\s+(\d{1,4})$", name, re.IGNORECASE)
+        if m and int(m.group(1)) == num:
+            print(name)
+            sys.exit(0)
 
 sys.exit(1)
 PYEOF
@@ -866,43 +784,39 @@ PYEOF
   rm -f "$entries_tmp"
 }
 
-fetch_audio_nextcloud() {
-  header "Fetching audio from Nextcloud"
+fetch_audio_r2() {
+  header "Fetching audio from R2"
 
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local local_audio_dir="${script_dir}/${AUDIO_DIR}"
   local local_tracks_dir="${script_dir}/${AUDIO_DIR}/${EPISODE_NUM_PADDED}"
 
-  local token webdav_base
-  token=$(nc_share_token)
-  webdav_base=$(nc_webdav_url)
-
   # Find the episode subdirectory
   local ep_dir
-  ep_dir=$(nc_find_episode_dir "$webdav_base" "$token")
+  ep_dir=$(r2_find_episode_dir)
 
   if [[ -z "$ep_dir" ]]; then
-    fatal "No episode directory found in '${NC_EPISODES_DIR}/' matching episode ${EPISODE_NUM}."
+    fatal "No episode directory found in '${R2_BASE_DIR}/' matching episode ${EPISODE_NUM}."
   fi
 
-  log "Found episode directory: ${NC_EPISODES_DIR}/${ep_dir}"
+  log "Found episode directory: ${R2_BASE_DIR}/${ep_dir}"
 
-  # Download main audio file — pick whatever file is in the audio/ subfolder
-  header "Fetching main audio from Nextcloud"
+  # Download main audio file — pick whatever audio file is in the full/ subfolder
+  header "Fetching main audio from R2"
 
-  local audio_subdir="${NC_EPISODES_DIR}/${ep_dir}/audio"
-  local audio_entries
-  audio_entries=$(nc_list_dir "$webdav_base" "$token" "$audio_subdir")
+  local full_remote="${R2_BASE_DIR}/${ep_dir}/${R2_FULL_DIR}"
+  local full_entries
+  full_entries=$(r2_list_dir "$full_remote")
 
-  if [[ -z "$audio_entries" ]]; then
-    fatal "No files found in '${audio_subdir}/' on Nextcloud."
+  if [[ -z "$full_entries" ]]; then
+    fatal "No files found in '${full_remote}/' on R2."
   fi
 
   local entries_tmp audio_file_tmp
-  entries_tmp=$(mktemp /tmp/nc-audio-entries.XXXXXX.txt)
-  audio_file_tmp=$(mktemp /tmp/nc-audio-pick.XXXXXX.txt)
-  echo "$audio_entries" > "$entries_tmp"
+  entries_tmp=$(mktemp /tmp/r2-audio-entries.XXXXXX.txt)
+  audio_file_tmp=$(mktemp /tmp/r2-audio-pick.XXXXXX.txt)
+  echo "$full_entries" > "$entries_tmp"
 
   python3 - "$entries_tmp" "$audio_file_tmp" <<'PYEOF'
 import sys, re
@@ -910,7 +824,7 @@ with open(sys.argv[1]) as f:
     names = [l.strip() for l in f if l.strip()]
 audio = [n for n in names if re.search(r'\.(wav|mp3)$', n, re.IGNORECASE)]
 if not audio:
-    sys.stderr.write("No .wav or .mp3 file found in audio/ subfolder\n")
+    sys.stderr.write("No .wav or .mp3 file found in full/ subfolder\n")
     sys.exit(1)
 if len(audio) > 1:
     sys.stderr.write(f"WARNING: {len(audio)} audio files found — using '{audio[0]}'.\n")
@@ -923,34 +837,27 @@ PYEOF
   rm -f "$entries_tmp" "$audio_file_tmp"
 
   if [[ -z "$audio_file" ]]; then
-    fatal "No audio file (.wav or .mp3) found in '${audio_subdir}/'."
+    fatal "No audio file (.wav or .mp3) found in '${full_remote}/'."
   fi
 
   local audio_ext
   audio_ext=$(python3 -c "import sys; print(sys.argv[1].rsplit('.', 1)[-1].lower())" "$audio_file")
   local audio_local="${local_audio_dir}/bitflip-e${EPISODE_NUM_PADDED}.${audio_ext}"
 
-  local audio_remote="${audio_subdir}/${audio_file}"
-  local audio_remote_encoded
-  audio_remote_encoded=$(python3 -c "from urllib.parse import quote; print(quote('${audio_remote}', safe='/'))")
-
   mkdir -p "$local_audio_dir"
 
   log "Downloading: ${audio_file} → $(basename "$audio_local")"
-  curl -sf \
-    -u "${token}:" \
-    "${webdav_base}/${audio_remote_encoded}" \
-    -o "$audio_local" 2>/dev/null \
-    || fatal "Failed to download '${audio_file}' from Nextcloud."
+  rclone copyto "${R2_REMOTE}:${R2_BUCKET}/${full_remote}/${audio_file}" "$audio_local" \
+    || fatal "Failed to download '${audio_file}' from R2."
 
   log "Audio saved: ${audio_local}"
 
-  # Download speaker tracks from the transcript/ subdirectory
-  header "Fetching speaker tracks from Nextcloud"
+  # Download speaker tracks from the speakers/ subdirectory
+  header "Fetching speaker tracks from R2"
 
-  local tracks_remote="${NC_EPISODES_DIR}/${ep_dir}/${NC_TRACKS_DIR}"
+  local tracks_remote="${R2_BASE_DIR}/${ep_dir}/${R2_SPEAKERS_DIR}"
   local track_files
-  track_files=$(nc_list_dir "$webdav_base" "$token" "$tracks_remote")
+  track_files=$(r2_list_dir "$tracks_remote")
 
   if [[ -z "$track_files" ]]; then
     log "WARNING: no files found in '${tracks_remote}/' — skipping speaker tracks."
@@ -962,26 +869,20 @@ PYEOF
 
     while IFS= read -r track_file; do
       [[ -z "$track_file" ]] && continue
-      local track_encoded
-      track_encoded=$(python3 -c "from urllib.parse import quote; print(quote('${tracks_remote}/${track_file}', safe='/'))")
+      [[ "$track_file" =~ \.(wav|mp3|WAV|MP3)$ ]] || continue
 
-      # Rename tGeoff.wav → 004-geoff.wav to match FileBrowser convention
+      # Rename geoff.wav → 010-geoff.wav to match FileBrowser convention
       local renamed
       renamed=$(python3 -c "
-import re, sys
-name = '${track_file}'
-m = re.match(r'^t(\w+)(\.\w+)$', name)
-if m:
-    print('${ep_prefix}-' + m.group(1).lower() + m.group(2).lower())
-else:
-    print(name)
-")
+import sys
+name = sys.argv[1]
+stem, ext = name.rsplit('.', 1)
+print(sys.argv[2] + '-' + stem.lower() + '.' + ext.lower())
+" "$track_file" "$ep_prefix")
 
       log "Downloading track: ${track_file} → ${renamed}"
-      curl -sf \
-        -u "${token}:" \
-        "${webdav_base}/${track_encoded}" \
-        -o "${local_tracks_dir}/${renamed}" 2>/dev/null \
+      rclone copyto "${R2_REMOTE}:${R2_BUCKET}/${tracks_remote}/${track_file}" \
+        "${local_tracks_dir}/${renamed}" \
         || { log "WARNING: failed to download '${track_file}' — skipping."; continue; }
       (( downloaded++ )) || true
     done <<< "$track_files"
@@ -1002,11 +903,11 @@ fetch_audio() {
       fetch_audio_filebrowser
       fetch_raw_tracks_filebrowser
       ;;
-    nextcloud)
-      fetch_audio_nextcloud
+    r2)
+      fetch_audio_r2
       ;;
     *)
-      fatal "Unknown AUDIO_SOURCE '${AUDIO_SOURCE}' — must be 'filebrowser' or 'nextcloud'."
+      fatal "Unknown AUDIO_SOURCE '${AUDIO_SOURCE}' — must be 'filebrowser' or 'r2'."
       ;;
   esac
 }
@@ -1036,8 +937,10 @@ main() {
     if [[ "$AUDIO_SOURCE" == "filebrowser" ]]; then
       load_fb_password
       fb_login
-    elif [[ "$AUDIO_SOURCE" == "nextcloud" ]]; then
-      load_nc_share_url
+    elif [[ "$AUDIO_SOURCE" == "r2" ]]; then
+      require rclone
+      rclone listremotes 2>/dev/null | grep -qx "${R2_REMOTE}:" \
+        || fatal "rclone remote '${R2_REMOTE}' not configured — run 'rclone config'."
     fi
   fi
 
