@@ -144,6 +144,23 @@ def main():
         merged.append((start, end, spk, text))
 
     # --------------------------------------------------
+    # Filter ASR hallucinations (short filler phrases Whisper inserts in silence)
+    # --------------------------------------------------
+
+    FILLER_PHRASES = {
+        "thank you", "thanks", "thank you so much", "thanks so much",
+        "thank you very much", "thanks very much",
+        "bye", "goodbye", "bye bye", "see you", "see ya",
+        "you're welcome", "youre welcome",
+    }
+
+    def is_filler(text):
+        normalised = text.lower().strip().rstrip(".,!?")
+        return normalised in FILLER_PHRASES
+
+    merged = [(s, e, spk, t) for s, e, spk, t in merged if not is_filler(t)]
+
+    # --------------------------------------------------
     # Write markdown
     # --------------------------------------------------
 
