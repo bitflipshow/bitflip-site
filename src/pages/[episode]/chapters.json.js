@@ -1,4 +1,5 @@
 import { getCollection } from "astro:content";
+import { parseChapterTime } from "../../lib/chapters";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
@@ -14,11 +15,7 @@ export async function GET({ props }) {
   const { episode } = props;
 
   const chapters = episode.data.chapters.map((chapter) => {
-    // Convert HH:MM:SS to total seconds
-    const [h, m, s] = chapter.time.split(":").map(Number);
-    const startTime = h * 3600 + m * 60 + s;
-
-    const entry = { startTime, title: chapter.title };
+    const entry = { startTime: parseChapterTime(chapter.time), title: chapter.title };
     if (chapter.img) entry.img = chapter.img;
     if (chapter.url) entry.url = chapter.url;
     return entry;

@@ -3,53 +3,42 @@ import { getCollection } from "astro:content";
 import Base from "../../layouts/Base.astro";
 import EpisodeCard from "../../components/EpisodeCard.astro";
 
-export async function getStaticPaths() {
+export async function getStaticPaths({ paginate }) {
   const allEpisodes = await getCollection("episodes", ({ data }) => !data.draft);
   const sortedEpisodes = allEpisodes.sort(
     (a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime()
   );
 
-  const PAGE_SIZE = 20;
-  const totalPages = Math.ceil(sortedEpisodes.length / PAGE_SIZE);
-
-  // Generate pages 2+ only — page 1 is handled by index.astro
-  return Array.from({ length: totalPages - 1 }, (_, i) => {
-    const pageNum = i + 2;
-    const start = (pageNum - 1) * PAGE_SIZE;
-    return {
-      params: { page: String(pageNum) },
-      props: {
-        pageEpisodes: sortedEpisodes.slice(start, start + PAGE_SIZE),
-        currentPage: pageNum,
-        totalPages,
-      },
-    };
-  });
+  return paginate(sortedEpisodes, { pageSize: 20 });
 }
 
-const { pageEpisodes, currentPage, totalPages } = Astro.props;
+const { page } = Astro.props;
+const title =
+  page.currentPage === 1
+    ? "Episodes | BitFlip.show"
+    : `Episodes — Page ${page.currentPage} | BitFlip.show`;
 ---
 
-<Base title={`Episodes — Page ${currentPage} | BitFlip.show`}>
+<Base title={title}>
   <div class="episodes-page">
     <h1 class="page-title">All Episodes</h1>
     <div class="episodes-grid">
-      {pageEpisodes.map((episode) => (
+      {page.data.map((episode) => (
         <EpisodeCard episode={episode} />
       ))}
     </div>
 
-    <div class="pagination">
-      <a href={currentPage === 2 ? "/episodes" : `/episodes/${currentPage - 1}`} class="page-link">
-        ← Previous
-      </a>
-      <span class="page-info">Page {currentPage} of {totalPages}</span>
-      {currentPage < totalPages && (
-        <a href={`/episodes/${currentPage + 1}`} class="page-link">
-          Next →
-        </a>
-      )}
-    </div>
+    {page.lastPage > 1 && (
+      <div class="pagination">
+        {page.url.prev && (
+          <a href={page.url.prev} class="page-link">← Previous</a>
+        )}
+        <span class="page-info">Page {page.currentPage} of {page.lastPage}</span>
+        {page.url.next && (
+          <a href={page.url.next} class="page-link">Next →</a>
+        )}
+      </div>
+    )}
   </div>
 </Base>
 

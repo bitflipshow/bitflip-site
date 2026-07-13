@@ -131,6 +131,7 @@ const ogImageURL = new URL(ogImage, Astro.site ?? "https://bitflip.show");
           <nav id="main-nav" class="nav-links" aria-label="Main navigation">
             <a href="/about" aria-current={Astro.url.pathname === '/about' ? 'page' : undefined}>About</a>
             <a href="/episodes" aria-current={Astro.url.pathname.startsWith('/episodes') ? 'page' : undefined}>Episodes</a>
+            <a href="/tags" aria-current={Astro.url.pathname.startsWith('/tags') ? 'page' : undefined}>Tags</a>
             <a href="/hosts" aria-current={Astro.url.pathname === '/hosts' ? 'page' : undefined}>Hosts</a>
             <a href="/subscribe" aria-current={Astro.url.pathname === '/subscribe' ? 'page' : undefined}>Subscribe</a>
             <a href="/support" aria-current={Astro.url.pathname === '/support' ? 'page' : undefined}>Support</a>

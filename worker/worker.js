@@ -43,13 +43,16 @@ export default {
     headers.set("accept-ranges", "bytes");
     headers.set("cache-control", "public, max-age=31536000, immutable");
 
-    // Set content-range header for partial responses
+    // Set content-range header for partial responses.
+    // R2's object.range is { offset?, length? } — compute the inclusive end
+    // byte ourselves (open-ended ranges run to the end of the object).
     if (range && object.range) {
-      const { offset, end } = object.range;
-      headers.set(
-        "content-range",
-        `bytes ${offset}-${end}/${object.size}`
-      );
+      const offset = object.range.offset ?? 0;
+      const end =
+        object.range.length != null
+          ? offset + object.range.length - 1
+          : object.size - 1;
+      headers.set("content-range", `bytes ${offset}-${end}/${object.size}`);
       headers.set("content-length", String(end - offset + 1));
     } else {
       headers.set("content-length", String(object.size));
