@@ -1,7 +1,7 @@
 import { getCollection } from "astro:content";
 import { SITE } from "../config";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readEpisodeSource } from "../lib/episode-source";
+import { stripFrontmatter } from "../lib/transcript";
 import MarkdownIt from "markdown-it";
 import sanitizeHtml from "sanitize-html";
 
@@ -15,20 +15,6 @@ function inferEnclosureType(audioUrl) {
   if (normalized.endsWith(".ogg")) return "audio/ogg";
   if (normalized.endsWith(".opus")) return "audio/opus";
   return "audio/mpeg";
-}
-
-async function hasTranscript(episode) {
-  try {
-    const mdPath = path.resolve(
-      process.cwd(),
-      "src/content/episodes",
-      episode.id
-    );
-    const raw = await fs.readFile(mdPath, "utf-8");
-    return /^##\s+transcript/im.test(raw);
-  } catch {
-    return false;
-  }
 }
 
 function escapeXml(str) {
@@ -50,35 +36,22 @@ export async function GET(context) {
   const siteUrl =
     context.site?.toString().replace(/\/$/, "") || "https://bitflip.show";
 
-  const transcriptFlags = await Promise.all(
-    sortedEpisodes.map((ep) => hasTranscript(ep))
-  );
-
-  const renderedHtml = await Promise.all(
+  const episodeSources = await Promise.all(
     sortedEpisodes.map(async (episode) => {
-      try {
-        const mdPath = path.resolve(
-          process.cwd(),
-          "src/content/episodes",
-          episode.id
-        );
-        const raw = await fs.readFile(mdPath, "utf-8");
-        // Strip YAML frontmatter
-        const withoutFrontmatter = raw.replace(/^---[\s\S]*?---\n?/, "");
-        // Strip ## Transcript section (and everything after) appended by publish script
-        const body = withoutFrontmatter.replace(/^##\s+transcript[\s\S]*/im, "").trimEnd();
-        const html = md.render(body);
-        return sanitizeHtml(html, {
-          allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
-          allowedAttributes: {
-            ...sanitizeHtml.defaults.allowedAttributes,
-            img: ["src", "alt", "title", "width", "height"],
-            a: ["href", "name", "target", "rel"],
-          },
-        });
-      } catch {
-        return "";
-      }
+      const raw = await readEpisodeSource(episode);
+      const withoutFrontmatter = stripFrontmatter(raw);
+      const hasTranscript = /^##\s+transcript/im.test(withoutFrontmatter);
+      // Strip ## Transcript section (and everything after) appended by publish script
+      const body = withoutFrontmatter.replace(/^##\s+transcript[\s\S]*/im, "").trimEnd();
+      const html = sanitizeHtml(md.render(body), {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
+        allowedAttributes: {
+          ...sanitizeHtml.defaults.allowedAttributes,
+          img: ["src", "alt", "title", "width", "height"],
+          a: ["href", "name", "target", "rel"],
+        },
+      });
+      return { hasTranscript, html };
     })
   );
 
@@ -91,7 +64,7 @@ export async function GET(context) {
       episode.data.chapters && episode.data.chapters.length > 0;
     const chaptersUrl = `${siteUrl}/${episode.data.episodeNumber}/chapters.json`;
 
-    const epHasTranscript = transcriptFlags[idx];
+    const epHasTranscript = episodeSources[idx].hasTranscript;
     const vttUrl = `${siteUrl}/${episode.data.episodeNumber}/transcript.vtt`;
     const txtUrl = `${siteUrl}/${episode.data.episodeNumber}/transcript.txt`;
 
@@ -106,7 +79,7 @@ export async function GET(context) {
       <description><![CDATA[${episode.data.summary}]]></description>
       <pubDate>${pubDate}</pubDate>
       <enclosure url="${escapeXml(episode.data.audioUrl)}" length="${episode.data.audioSize}" type="${inferEnclosureType(episode.data.audioUrl)}" />
-      <content:encoded><![CDATA[${renderedHtml[idx]}]]></content:encoded>
+      <content:encoded><![CDATA[${episodeSources[idx].html}]]></content:encoded>
       <itunes:title>${escapeXml(episode.data.title)}</itunes:title>
       ${episode.data.episodeNumber > 0 ? `<itunes:episode>${episode.data.episodeNumber}</itunes:episode>` : ""}
       <itunes:episodeType>full</itunes:episodeType>
@@ -130,7 +103,7 @@ export async function GET(context) {
   xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>${escapeXml(SITE.title)}</title>
-    <description><![CDATA[${escapeXml(SITE.tagline)}]]></description>
+    <description><![CDATA[${SITE.tagline}]]></description>
     <link>${siteUrl}/</link>
     <language>en-us</language>
     <image>

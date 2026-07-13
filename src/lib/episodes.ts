@@ -42,6 +42,19 @@ export function findEpisodeByNumber<T extends EpisodeLike>(
   return episodes.find((episode) => readEpisodeNumber(episode) === episodeNumber);
 }
 
+/** Convert "MM:SS" or "HH:MM:SS" to an ISO 8601 duration (e.g. "PT52M52S") */
+export function toIso8601Duration(duration: string): string {
+  const parts = duration.split(":").map(Number);
+  if (parts.some(Number.isNaN)) return duration;
+  const [h, m, s] =
+    parts.length === 3 ? parts : parts.length === 2 ? [0, ...parts] : [0, 0, parts[0]];
+  let out = "PT";
+  if (h) out += `${h}H`;
+  if (m) out += `${m}M`;
+  out += `${s}S`;
+  return out;
+}
+
 export function formatEpisodeDate(date: string): string {
   return new Date(`${date}T12:00:00.000Z`).toLocaleDateString("en-US", {
     year: "numeric",

@@ -5,7 +5,9 @@ import { z } from "astro/zod";
 const chaptersSchema = z
   .array(
     z.object({
-      time: z.string(),
+      time: z
+        .string()
+        .regex(/^\d{2}:\d{2}:\d{2}$/, "chapter time must be HH:MM:SS"),
       title: z.string(),
       img: z.url().optional(),
       url: z.url().optional(),
@@ -31,7 +33,6 @@ const episodes = defineCollection({
     coverImage: z.string().optional().default("/images/podcast-cover-large.png"),
     explicit: z.boolean(),
     youtubeUrl: z.url().optional(),
-    transcriptUrl: z.url().optional(),
     chapters: chaptersSchema,
     tags: z.array(z.string()).optional(),
     draft: z.boolean().optional().default(false),

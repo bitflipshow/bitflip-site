@@ -16,7 +16,7 @@
     script.type = 'module';
     script.src = '/pagefind/pagefind-component-ui.js';
     script.onerror = function() {
-      const el = document.querySelector('pagefind-search');
+      const el = document.querySelector('pagefind-searchbox');
       if (el) {
         el.insertAdjacentHTML('afterend',
           '<div class="search-unavailable">' +

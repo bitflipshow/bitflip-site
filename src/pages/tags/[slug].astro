@@ -2,24 +2,29 @@
 import Base from "../../layouts/Base.astro";
 import { getCollection } from "astro:content";
 import EpisodeCard from "../../components/EpisodeCard.astro";
+import { slugifyTag } from "../../lib/tags";
 
 export async function getStaticPaths() {
   const episodes = await getCollection("episodes", ({ data }) => !data.draft);
-  
-  const allTags = new Set<string>();
+
+  // slug → display label (first-seen spelling, lowercased)
+  const allTags = new Map<string, string>();
   episodes.forEach((episode) => {
-    (episode.data.tags || []).forEach((tag) => allTags.add(tag.toLowerCase()));
+    (episode.data.tags || []).forEach((tag) => {
+      const slug = slugifyTag(tag);
+      if (!allTags.has(slug)) allTags.set(slug, tag.toLowerCase());
+    });
   });
-  
-  return Array.from(allTags).map((tag) => {
+
+  return Array.from(allTags.entries()).map(([slug, tag]) => {
     const taggedEpisodes = episodes
-      .filter((episode) => 
-        (episode.data.tags || []).map(t => t.toLowerCase()).includes(tag)
+      .filter((episode) =>
+        (episode.data.tags || []).some((t) => slugifyTag(t) === slug)
       )
       .sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
-    
+
     return {
-      params: { slug: tag },
+      params: { slug },
       props: { tag, episodes: taggedEpisodes },
     };
   });

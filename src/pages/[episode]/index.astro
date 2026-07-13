@@ -3,8 +3,9 @@ import Base from "../../layouts/Base.astro";
 import AudioPlayer from "../../components/AudioPlayer.astro";
 import TranscriptRenderer from "../../components/TranscriptRenderer.astro";
 import { getCollection, render } from "astro:content";
-import { formatEpisodeDate } from "../../lib/episodes";
+import { formatEpisodeDate, toIso8601Duration } from "../../lib/episodes";
 import { resolveGuestAvatarSrc } from "../../lib/guest-avatars";
+import { slugifyTag } from "../../lib/tags";
 import { SITE } from "../../config";
 
 export async function getStaticPaths() {
@@ -53,7 +54,7 @@ const jsonLd = {
   "associatedMedia": {
     "@type": "MediaObject",
     "contentUrl": episode.data.audioUrl,
-    "duration": episode.data.duration,
+    "duration": toIso8601Duration(episode.data.duration),
     "encodingFormat": "audio/mpeg"
   },
   "partOfSeries": {
@@ -85,7 +86,7 @@ const jsonLd = {
       {tags && tags.length > 0 && (
         <div class="detail-tags">
           {tags.map((tag: string) => (
-            <a href={`/tags/${tag.toLowerCase()}`} class="tag">#{tag}</a>
+            <a href={`/tags/${slugifyTag(tag)}`} class="tag">#{tag}</a>
           ))}
         </div>
       )}
