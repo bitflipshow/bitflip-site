@@ -72,8 +72,13 @@ export async function GET(context) {
       `${episode.data.date}T12:00:00.000Z`
     ).toUTCString();
 
+    const displayTitle =
+      episode.data.episodeNumber > 0
+        ? `Episode ${episode.data.episodeNumber}: ${episode.data.title}`
+        : episode.data.title;
+
     return `<item>
-      <title>${escapeXml(episode.data.title)}</title>
+      <title>${escapeXml(displayTitle)}</title>
       <link>${siteUrl}/${episode.data.episodeNumber}</link>
       <guid isPermaLink="true">${siteUrl}/${episode.data.episodeNumber}</guid>
       <description><![CDATA[${episode.data.summary}]]></description>
