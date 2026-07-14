@@ -111,6 +111,7 @@ export async function GET(context) {
     <description><![CDATA[${SITE.tagline}]]></description>
     <link>${siteUrl}/</link>
     <language>en-us</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
     <image>
       <url>${coverImageUrl}</url>
       <title>${escapeXml(SITE.title)}</title>
