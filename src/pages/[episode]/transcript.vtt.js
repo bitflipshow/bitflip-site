@@ -15,17 +15,14 @@ export async function getStaticPaths() {
 }
 
 /**
- * Format seconds as MM:SS.mmm (matching AI-generated transcript style).
- * Omits the HH: component unless the episode is >= 1 hour.
+ * Format seconds as HH:MM:SS.mmm. The short MM:SS.mmm form is valid WebVTT,
+ * but some podcast app transcript parsers only accept full-length timestamps.
  */
-function toVtt(seconds, includeHours) {
+function toVtt(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = (seconds % 60).toFixed(3).padStart(6, "0");
-  if (includeHours) {
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${s}`;
-  }
-  return `${String(m).padStart(2, "0")}:${s}`;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${s}`;
 }
 
 export async function GET({ props }) {
@@ -41,13 +38,7 @@ export async function GET({ props }) {
     });
   }
 
-  // Determine if any cue exceeds 1 hour — if so, use HH:MM:SS.mmm throughout
   const FALLBACK_DURATION = 30;
-  const allSeconds = cues
-    .map((c) => timestampToSeconds(c.timestamp))
-    .filter((s) => s !== null);
-  const maxSeconds = allSeconds.length ? Math.max(...allSeconds) : 0;
-  const includeHours = maxSeconds >= 3600;
 
   const lines = ["WEBVTT", ""];
 
@@ -69,7 +60,7 @@ export async function GET({ props }) {
 
     if (endSec <= startSec) endSec = startSec + FALLBACK_DURATION;
 
-    lines.push(`${toVtt(startSec, includeHours)} --> ${toVtt(endSec, includeHours)}`);
+    lines.push(`${toVtt(startSec)} --> ${toVtt(endSec)}`);
     lines.push(`[${cue.speaker}]: ${cue.text}`);
     lines.push("");
   }
