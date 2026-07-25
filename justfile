@@ -130,6 +130,25 @@ upload episode audio:
 dry-run episode *flags:
     {{ publish_script }} "{{ episode }}" --dry-run {{ flags }}
 
+# Re-download the live MP3 from R2, re-embed chapters from the current
+# episode frontmatter, and re-upload. Use this when chapters/other frontmatter-
+# driven metadata were edited after the episode was already published, so the
+# live MP3 has drifted from what's in the .md file.
+# Usage: just reembed 7
+reembed episode *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    padded=$(printf "%04d" "{{ episode }}")
+    md="episodes/${padded}.md"
+    [[ -f "$md" ]] || { echo "Error: $md not found" >&2; exit 1; }
+    audio_url=$(awk -F'"' '/^audioUrl:/{print $2; exit}' "$md")
+    [[ -n "$audio_url" ]] || { echo "Error: no audioUrl found in $md" >&2; exit 1; }
+    tmp=$(mktemp "/tmp/reembed-${padded}.XXXXXX.mp3")
+    trap 'rm -f "$tmp"' EXIT
+    echo "Downloading live MP3: $audio_url"
+    curl -sfL "$audio_url" -o "$tmp" || { echo "Error: failed to download $audio_url" >&2; exit 1; }
+    {{ publish_script }} "$md" "$tmp" --skip-encode {{ flags }}
+
 # Replace Speaker_NN labels in a transcript with real names, then git commit
 # Usage: just fix-speakers 3
 fix-speakers episode:

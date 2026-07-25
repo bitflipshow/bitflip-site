@@ -1037,6 +1037,7 @@ embed_chapters() {
     -i "$MP3_TEMP" \
     -i "$meta_file" \
     -map_metadata 1 \
+    -map_chapters 1 \
     -map 0 \
     -c copy \
     "$chaptered"
