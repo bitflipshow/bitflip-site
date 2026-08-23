@@ -880,13 +880,18 @@ PYEOF
       [[ -z "$track_file" ]] && continue
       [[ "$track_file" =~ \.(wav|mp3|WAV|MP3)$ ]] || continue
 
-      # Rename geoff.wav → 010-geoff.wav to match FileBrowser convention
+      # Rename geoff.wav → 010-geoff.wav to match FileBrowser convention.
+      # R2 filenames are sometimes just the speaker name ("Alex.wav") and
+      # sometimes the full episode title ("Bitflip Ep 13 - Alex.wav") — in
+      # the latter case, only the bit after the last " - " is the speaker.
       local renamed
       renamed=$(python3 -c "
 import sys
 name = sys.argv[1]
 stem, ext = name.rsplit('.', 1)
-print(sys.argv[2] + '-' + stem.lower() + '.' + ext.lower())
+speaker = stem.rsplit(' - ', 1)[-1].strip()
+speaker = speaker.replace(' ', '')
+print(sys.argv[2] + '-' + speaker.lower() + '.' + ext.lower())
 " "$track_file" "$ep_prefix")
 
       log "Downloading track: ${track_file} → ${renamed}"
