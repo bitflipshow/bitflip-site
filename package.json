@@ -17,6 +17,6 @@
   },
   "devDependencies": {
     "pagefind": "^1.5.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
