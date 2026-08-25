@@ -42,6 +42,11 @@ pull episode:
 pull-notes episode:
     ./pull-data.sh "{{ episode }}" --skip-audio
 
+# Pull audio (and speaker tracks) only from R2/FileBrowser (skip Outline doc)
+# Usage: just pull-audio 3
+pull-audio episode:
+    ./pull-data.sh "{{ episode }}" --skip-notes
+
 # ------------------------------------------------------------
 # Publishing recipes
 #
@@ -54,6 +59,7 @@ pull-notes episode:
 # local                transcribe + Claude chapters  (no upload, saved locally)
 # local-nochapters     transcribe only               (no upload)
 # local-notx           (no transcription)            (no upload)
+# transcribe           raw transcript only, to a standalone file — no episode .md required
 # ------------------------------------------------------------
 
 # transcribe + Claude chapters + R2 upload + open GitHub PR
@@ -81,6 +87,17 @@ local episode *flags:
 # Usage: just local-nochapters 3
 local-nochapters episode *flags:
     {{ publish_script }} "{{ episode }}" --transcribe --no-chapters --skip-upload {{ flags }}
+
+# raw transcription only — writes just the transcript to a standalone file
+# and stops. No episode .md required (works from an episode number or a
+# direct audio file path), no chapters, no Claude correction, no upload.
+# Use this when shownotes aren't ready yet and you just want a transcript
+# to hand to an LLM.
+# Usage: just transcribe 3
+#        just transcribe 3 --transcript-output transcripts/0003.md
+#        just transcribe audio/some-file.wav
+transcribe episode *flags:
+    {{ publish_script }} "{{ episode }}" --transcript-output "transcripts/{{ episode }}.md" {{ flags }}
 
 # encode + embed existing chapters, save locally (no transcription, no R2 upload)
 # Usage: just local-notx 3

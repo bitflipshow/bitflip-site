@@ -9,6 +9,9 @@ audio/
 *.wav
 *.flac
 
+# transcripts
+transcripts/
+
 # dependencies
 node_modules/
 

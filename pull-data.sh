@@ -8,8 +8,10 @@
 #
 # Usage:
 #   ./pull-data.sh <episode-number> [--skip-audio]
+#   ./pull-data.sh <episode-number> --skip-notes
 #   ./pull-data.sh 3
 #   ./pull-data.sh 42 --skip-audio
+#   ./pull-data.sh 42 --skip-notes
 #
 # Requirements:
 #   curl, python3, rclone (for AUDIO_SOURCE=r2)
@@ -53,6 +55,7 @@ OUTLINE_API_KEY=""
 FB_PASS=""
 FB_TOKEN=""
 SKIP_AUDIO=false
+SKIP_NOTES=false
 
 ########################################
 # Utility
@@ -73,9 +76,10 @@ require() {
 ########################################
 
 usage() {
-  echo "Usage: $0 <episode-number> [--skip-audio]"
+  echo "Usage: $0 <episode-number> [--skip-audio] [--skip-notes]"
   echo "Example: $0 3"
   echo "         $0 42 --skip-audio"
+  echo "         $0 42 --skip-notes"
   exit 1
 }
 
@@ -93,10 +97,15 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --skip-audio) SKIP_AUDIO=true ;;
+      --skip-notes) SKIP_NOTES=true ;;
       *) usage ;;
     esac
     shift
   done
+
+  if [[ "$SKIP_AUDIO" == true && "$SKIP_NOTES" == true ]]; then
+    fatal "--skip-audio and --skip-notes together would do nothing."
+  fi
 }
 
 ########################################
@@ -871,13 +880,18 @@ PYEOF
       [[ -z "$track_file" ]] && continue
       [[ "$track_file" =~ \.(wav|mp3|WAV|MP3)$ ]] || continue
 
-      # Rename geoff.wav → 010-geoff.wav to match FileBrowser convention
+      # Rename geoff.wav → 010-geoff.wav to match FileBrowser convention.
+      # R2 filenames are sometimes just the speaker name ("Alex.wav") and
+      # sometimes the full episode title ("Bitflip Ep 13 - Alex.wav") — in
+      # the latter case, only the bit after the last " - " is the speaker.
       local renamed
       renamed=$(python3 -c "
 import sys
 name = sys.argv[1]
 stem, ext = name.rsplit('.', 1)
-print(sys.argv[2] + '-' + stem.lower() + '.' + ext.lower())
+speaker = stem.rsplit(' - ', 1)[-1].strip()
+speaker = speaker.replace(' ', '')
+print(sys.argv[2] + '-' + speaker.lower() + '.' + ext.lower())
 " "$track_file" "$ep_prefix")
 
       log "Downloading track: ${track_file} → ${renamed}"
@@ -932,7 +946,6 @@ main() {
     log "Branch created"
   fi
 
-  load_api_key
   if [[ "$SKIP_AUDIO" == false ]]; then
     if [[ "$AUDIO_SOURCE" == "filebrowser" ]]; then
       load_fb_password
@@ -944,36 +957,40 @@ main() {
     fi
   fi
 
-  local doc_id
-  doc_id=$(find_episode_doc) \
-    || fatal "No Outline doc found matching 'Episode ${EPISODE_NUM}'."
+  local episode_path=""
+  if [[ "$SKIP_NOTES" == false ]]; then
+    load_api_key
 
-  local doc_content
-  doc_content=$(fetch_doc "$doc_id")
+    local doc_id
+    doc_id=$(find_episode_doc) \
+      || fatal "No Outline doc found matching 'Episode ${EPISODE_NUM}'."
 
-  header "Parsing doc"
+    local doc_content
+    doc_content=$(fetch_doc "$doc_id")
 
-  local show_notes
-  show_notes=$(extract_show_notes_section "$doc_content")
-  if [[ -z "$show_notes" ]]; then
-    fatal "No '# Show Notes' section found in the Outline doc."
+    header "Parsing doc"
+
+    local show_notes
+    show_notes=$(extract_show_notes_section "$doc_content")
+    if [[ -z "$show_notes" ]]; then
+      fatal "No '# Show Notes' section found in the Outline doc."
+    fi
+
+    local fm_section fm_block fm_json
+    fm_section=$(extract_section "$show_notes" "Episode Frontmatter")
+    fm_block=$(extract_code_block "$fm_section") \
+      || fatal "No fenced code block found under '## Episode Frontmatter'."
+    fm_json=$(parse_yaml_to_json "$fm_block")
+    log "Frontmatter parsed OK"
+
+    local what_we_cover links transcript
+    what_we_cover=$(extract_section "$show_notes" "What We Cover")
+    links=$(extract_section "$show_notes" "Links")
+    transcript=$(extract_section "$show_notes" "Transcript")
+
+    header "Writing episode file"
+    episode_path=$(build_episode_md "$fm_json" "$what_we_cover" "$links" "$transcript")
   fi
-
-  local fm_section fm_block fm_json
-  fm_section=$(extract_section "$show_notes" "Episode Frontmatter")
-  fm_block=$(extract_code_block "$fm_section") \
-    || fatal "No fenced code block found under '## Episode Frontmatter'."
-  fm_json=$(parse_yaml_to_json "$fm_block")
-  log "Frontmatter parsed OK"
-
-  local what_we_cover links transcript
-  what_we_cover=$(extract_section "$show_notes" "What We Cover")
-  links=$(extract_section "$show_notes" "Links")
-  transcript=$(extract_section "$show_notes" "Transcript")
-
-  header "Writing episode file"
-  local episode_path
-  episode_path=$(build_episode_md "$fm_json" "$what_we_cover" "$links" "$transcript")
 
   local audio_path=""
   if [[ "$SKIP_AUDIO" == false ]]; then
@@ -982,7 +999,9 @@ main() {
 
   echo
   echo "Done."
-  echo "Episode file: ${episode_path}"
+  if [[ -n "$episode_path" ]]; then
+    echo "Episode file: ${episode_path}"
+  fi
   if [[ -n "$audio_path" ]]; then
     echo "Audio file:   ${audio_path}"
   fi

@@ -79,6 +79,8 @@ DO_GENERATE_CHAPTERS=false
 FORCE_CHAPTERS=false
 OPEN_PR=false
 OUTPUT_FILE=""
+TRANSCRIPT_OUTPUT=""
+EPISODE_ARG_RESOLVED=false
 
 EPISODE_NUM=""
 EPISODE_TITLE=""
@@ -188,6 +190,45 @@ resolve_episode_files() {
   log "Resolved audio:   ${SOURCE_AUDIO}"
 }
 
+# Same audio auto-resolution as resolve_episode_files, but doesn't require an
+# episode .md to already exist — used by --transcript-output mode.
+resolve_audio_only() {
+  local num="$1"
+  local padded
+  padded=$(printf "%04d" "$(( 10#$num ))")
+  EPISODE_NUM_PADDED="$padded"
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  local audio_match=""
+  local wav_match=""
+  while IFS= read -r -d '' candidate; do
+    local bname ext corename epnum
+    bname=$(basename "$candidate")
+    ext="${bname##*.}"
+    corename="${bname#*bitflip-e}"
+    epnum="${corename%%.*}"
+    if [[ "$epnum" =~ ^[0-9]+$ ]] && [[ "$((10#$epnum))" -eq "$((10#$num))" ]]; then
+      if [[ "$ext" == "mp3" ]]; then
+        audio_match="$candidate"
+        break
+      elif [[ "$ext" == "wav" && -z "$wav_match" ]]; then
+        wav_match="$candidate"
+      fi
+    fi
+  done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "*.wav" -o -name "*.mp3" \) -print0 2>/dev/null | sort -z)
+
+  audio_match="${audio_match:-$wav_match}"
+
+  if [[ -z "$audio_match" ]]; then
+    fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
+  fi
+  SOURCE_AUDIO="$audio_match"
+
+  log "Resolved audio: ${SOURCE_AUDIO}"
+}
+
 ########################################
 # Argument Parsing
 ########################################
@@ -202,6 +243,8 @@ usage() {
   echo "  --skip-encode         Use source audio as-is (must already be MP3)"
   echo "  --skip-upload         Skip R2 upload"
   echo "  --output <file>       Save final MP3 to this path (implied by --skip-upload)"
+  echo "  --transcript-output <file>  Write only the raw transcript to this file and stop"
+  echo "                         (no episode .md required; resolves audio by number only)"
   echo "  --transcribe          Transcribe via WhisperX API; generates chapters via Claude"
   echo "  --no-chapters         Transcribe but skip Claude chapter generation"
   echo "  --no-claude-fix       Skip Claude transcript correction step"
@@ -212,6 +255,15 @@ usage() {
 }
 
 parse_args() {
+  # Pre-scan for --transcript-output so a numeric episode arg (which may
+  # appear before the flag) knows whether to require an existing episode .md.
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--transcript-output" ]]; then
+      TRANSCRIPT_OUTPUT="__pending__"
+    fi
+  done
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run) DRY_RUN=true ;;
@@ -225,11 +277,23 @@ parse_args() {
       --open-pr) OPEN_PR=true ;;
       --cover) COVER_ART="$2"; shift ;;
       --output) OUTPUT_FILE="$2"; shift ;;
+      --transcript-output) TRANSCRIPT_OUTPUT="$2"; shift ;;
       -*) usage ;;
       *)
-        if [[ -z "$MD_FILE" ]]; then
+        if [[ -z "$MD_FILE" && "$EPISODE_ARG_RESOLVED" == false ]]; then
           if [[ "$1" =~ ^[0-9]+$ ]]; then
-            resolve_episode_files "$1"
+            if [[ -n "$TRANSCRIPT_OUTPUT" ]]; then
+              resolve_audio_only "$1"
+            else
+              resolve_episode_files "$1"
+            fi
+            EPISODE_ARG_RESOLVED=true
+          elif [[ -n "$TRANSCRIPT_OUTPUT" ]]; then
+            # transcript-only mode: treat a non-numeric arg as the audio file directly
+            [[ -f "$1" ]] || fatal "Audio file not found: $1"
+            SOURCE_AUDIO="$1"
+            EPISODE_NUM_PADDED="direct"
+            EPISODE_ARG_RESOLVED=true
           else
             MD_FILE="$1"
           fi
@@ -242,6 +306,13 @@ parse_args() {
     esac
     shift
   done
+
+  if [[ -n "$TRANSCRIPT_OUTPUT" ]]; then
+    if [[ -z "$SOURCE_AUDIO" ]]; then
+      fatal "--transcript-output requires an episode number or audio file"
+    fi
+    return
+  fi
 
   if [[ -z "$MD_FILE" ]]; then
     usage
@@ -1318,8 +1389,42 @@ print(data.get('html_url', ''))
 # Main Pipeline
 ########################################
 
+run_transcript_only_mode() {
+  header "Transcribing (transcript-only mode, no episode file required)"
+
+  DO_TRANSCRIBE=true
+  check_dependencies
+
+  MP3_TEMP=$(mktemp /tmp/bitflip-encoded.XXXXXX.mp3)
+  CLEANUP_FILES+=("$MP3_TEMP")
+  if [[ "$DRY_RUN" == false ]]; then
+    ffprobe -v error "$SOURCE_AUDIO" >/dev/null 2>&1 \
+      || fatal "Source audio is not a valid media file: $SOURCE_AUDIO"
+    cp "$SOURCE_AUDIO" "$MP3_TEMP"
+  fi
+
+  run_transcription
+
+  echo
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Done (dry run)"
+    return
+  fi
+
+  mkdir -p "$(dirname "$TRANSCRIPT_OUTPUT")"
+  cp "$TRANSCRIPT_FILE" "$TRANSCRIPT_OUTPUT"
+
+  echo "Done."
+  echo "Transcript written to: ${TRANSCRIPT_OUTPUT}"
+}
+
 main() {
   parse_args "$@"
+
+  if [[ -n "$TRANSCRIPT_OUTPUT" ]]; then
+    run_transcript_only_mode
+    return
+  fi
 
   COVER_ART="${COVER_ART:-$DEFAULT_COVER}"
 
