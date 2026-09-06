@@ -57,7 +57,7 @@ GITHUB_TOKEN_FILE="~/.config/bitflip/github_token"   # One line: a token with re
 GITHUB_REPO="bitflipshow/bitflip-site"               # owner/repo
 
 # FileBrowser
-FB_HOST="http://100.104.240.5:8080"
+FB_HOST="http://100.104.240.4:8080"
 FB_USER="production"
 FB_PASS_FILE="~/.config/bitflip/fb_password"
 FB_DEST_DIR="bitflip-episodes"
@@ -651,8 +651,11 @@ transcribe_tracks_api() {
   while IFS= read -r -d '' track; do
     local bname speaker out_file http_status
     bname=$(basename "$track")
-    speaker=$(echo "$bname" | sed 's/^[0-9]*-//;s/\.[^.]*$//' | \
-              awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+    # Track files are named like "01-E14-host-alex.wav" or "01-alex.wav".
+    # The speaker name is the final dash-delimited segment; drop the leading
+    # index and any "E<ep>-<role>-" prefix, then capitalize.
+    speaker=$(echo "$bname" | sed 's/\.[^.]*$//' | \
+              awk -F- '{print toupper(substr($NF,1,1)) substr($NF,2)}')
     out_file="${json_dir}/${speaker}.json"
 
     log "  Transcribing track: ${speaker} (${bname})"
