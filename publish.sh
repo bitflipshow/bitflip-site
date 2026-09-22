@@ -508,7 +508,7 @@ read_metadata() {
   if [[ ! "$EPISODE_NUM" =~ ^[0-9]+$ ]]; then fatal "episodeNumber must be numeric"; fi
   if [[ -z "$EPISODE_DATE" ]]; then fatal "date missing from frontmatter"; fi
 
-  EPISODE_NUM_PADDED=$(printf "%04d" "$EPISODE_NUM")
+  EPISODE_NUM_PADDED=$(printf "%04d" "$((10#$EPISODE_NUM))")
   MP3_FILENAME="${EPISODE_DATE}-bitflip-e${EPISODE_NUM_PADDED}.mp3"
 
   log "Episode: #${EPISODE_NUM} - ${EPISODE_TITLE}"
