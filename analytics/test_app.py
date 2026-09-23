@@ -4,6 +4,7 @@ import json
 import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 os.environ["HASH_SECRET"] = "test-secret"
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.sqlite3")
@@ -15,6 +16,7 @@ class AnalyticsTests(unittest.TestCase):
     def setUp(self):
         self.db = app.connect()
         self.db.execute("DELETE FROM processed_events")
+        self.db.execute("DELETE FROM platform_daily")
         self.db.execute("DELETE FROM sessions")
         self.db.execute("DELETE FROM downloads")
         self.db.execute("DELETE FROM episodes")
@@ -105,6 +107,34 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(app.pull_r2(self.db, client), 0)
         self.assertEqual(self.db.execute("SELECT count(*) FROM downloads").fetchone()[0], 1)
         self.assertEqual(len(client.deleted), 2)
+
+    def test_ipv6_rotation_and_mapped_ipv4_dedupe(self):
+        self.assertEqual(app.ingest(self.db, self.event(ip="2001:db8:abcd:12::1"), self.now), "counted")
+        self.assertEqual(app.ingest(self.db, self.event(ip="2001:0db8:abcd:0012::2"), self.now + 1), "duplicate")
+        self.assertEqual(app.ingest(self.db, self.event(ip="2001:db8:abcd:13::1"), self.now + 1), "counted")
+        self.assertEqual(app.ingest(self.db, self.event(ip="::ffff:198.51.100.9"), self.now), "counted")
+        self.assertEqual(app.ingest(self.db, self.event(ip="198.51.100.9"), self.now + 1), "duplicate")
+        for ip in ("invalid", "127.0.0.1", "::", "ff02::1", "fe80::1"):
+            self.assertEqual(app.ingest(self.db, self.event(ip=ip), self.now), "filtered")
+
+    def test_youtube_query_and_idempotent_episode_mapping(self):
+        requests = []
+        def fetch(request, **kwargs):
+            requests.append(request)
+            if request.full_url == "https://oauth2.googleapis.com/token":
+                return io.BytesIO(b'{"access_token":"test-token"}')
+            params = app.urllib.parse.parse_qs(app.urllib.parse.urlparse(request.full_url).query)
+            self.assertEqual(params["filters"], ["video==video15"])
+            self.assertEqual(params["startDate"], ["2023-11-14"])
+            self.assertEqual(params["sort"], ["day,video"])
+            return io.BytesIO(json.dumps({"rows": [["2023-11-15", "video15", 12, 40.5]]}).encode())
+        with patch.dict(os.environ, {"YOUTUBE_CLIENT_ID": "test", "YOUTUBE_CLIENT_SECRET": "test", "YOUTUBE_REFRESH_TOKEN": "test"}), patch.object(app.urllib.request, "urlopen", side_effect=fetch):
+            self.assertEqual(app.sync_youtube(self.db), 1)
+            self.assertEqual(app.sync_youtube(self.db), 1)
+        episode = app.summary(self.db, self.now + 2 * app.DAY)["episodes"][0]
+        self.assertEqual(episode["youtube_views"], 12)
+        self.assertEqual(episode["youtube_watch_minutes"], 40.5)
+        self.assertEqual(episode["lifetime"], 0)
 
     def test_event_and_count_roll_back_together(self):
         self.db.execute("""CREATE TEMP TRIGGER fail_marker BEFORE INSERT ON processed_events

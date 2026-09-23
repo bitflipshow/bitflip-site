@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import html
 import json
+import ipaddress
 import os
 import re
 import sqlite3
@@ -72,6 +73,18 @@ def connect():
 
 def secret_hash(value):
     return hmac.new(os.environ["HASH_SECRET"].encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+def listener_ip(value):
+    """Canonicalize IPv4 and truncate IPv6 to /64 before hashing (IAB v2.2)."""
+    address = ipaddress.ip_address(value)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if address.is_unspecified or address.is_loopback or address.is_multicast or address.is_link_local:
+        raise ValueError("not a listener address")
+    if isinstance(address, ipaddress.IPv6Address):
+        return str(ipaddress.ip_network(f"{address}/64", strict=False).network_address)
+    return str(address)
 
 
 def duration_seconds(value):
@@ -186,6 +199,10 @@ def _ingest(db, event, now=None):
     ip = str(event.get("ip") or "")[:100]
     if not ua or not ip or BOT.search(ua):
         return "filtered"
+    try:
+        ip = listener_ip(ip)
+    except ValueError:
+        return "filtered"
     episode = db.execute("SELECT * FROM episodes WHERE filename=?", (event.get("filename"),)).fetchone()
     if episode is None:
         return "unknown_episode"
@@ -201,11 +218,11 @@ def _ingest(db, event, now=None):
     fingerprint = secret_hash(ip + "\x00" + ua)
     ip_hash = secret_hash(ip)
     duplicate = db.execute("""SELECT 1 FROM downloads WHERE episode=? AND fingerprint=?
-        AND counted_at>? LIMIT 1""", (episode["number"], fingerprint, now - DAY)).fetchone()
+        AND counted_at>? AND counted_at<=? LIMIT 1""", (episode["number"], fingerprint, now - DAY, now)).fetchone()
     if duplicate:
         return "duplicate"
     session = db.execute("""SELECT * FROM sessions WHERE episode=? AND fingerprint=?
-        AND opened>? ORDER BY opened DESC LIMIT 1""", (episode["number"], fingerprint, now - DAY)).fetchone()
+        AND opened>? AND opened<=? ORDER BY opened DESC LIMIT 1""", (episode["number"], fingerprint, now - DAY, now)).fetchone()
     ranges = merge_ranges((json.loads(session["ranges"]) if session else []) + [[start, end]])
     if session:
         db.execute("UPDATE sessions SET ranges=? WHERE id=?", (json.dumps(ranges), session["id"]))
@@ -358,11 +375,14 @@ def sync_youtube(db):
     if not start:
         return 0
     videos = {row["youtube_id"]: row["number"] for row in db.execute("SELECT youtube_id,number FROM episodes WHERE youtube_id IS NOT NULL")}
+    if not videos:
+        return 0
     count = 0
     index = 1
     while True:
-        params = urllib.parse.urlencode({"ids": "channel==MINE", "startDate": start,
+        params = urllib.parse.urlencode({"ids": "channel==MINE", "startDate": start[:10],
             "endDate": datetime.now(timezone.utc).date().isoformat(), "dimensions": "day,video",
+            "filters": "video==" + ",".join(videos), "sort": "day,video",
             "metrics": "views,estimatedMinutesWatched", "maxResults": "200", "startIndex": str(index)})
         request = urllib.request.Request("https://youtubeanalytics.googleapis.com/v2/reports?" + params,
                                          headers={"Authorization": "Bearer " + token})

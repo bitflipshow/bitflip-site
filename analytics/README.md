@@ -4,7 +4,7 @@ This service keeps podcast download counts in SQLite on `infra-svcs` and serves 
 
 ## Metrics
 
-- **RSS audio downloads:** Counts an episode once for each IP address and user agent pair in a rolling 24-hour window, after enough unique bytes are served to cover its measured ID3 header and approximately one minute of audio. Reassembled range requests count once. HEAD, two-byte probes, common bots, and watchOS duplicates are excluded. The dashboard shows first-24-hour, first-7-day, first-30-day, and recorded lifetime counts for each episode, plus an episode comparison chart for the first 30 days. Windows start at the publication timestamp in the RSS metadata; date-only publications use midnight UTC. Completed windows retain their totals. Unavailable history is shown as a dash; partially observed windows and windows still collecting are labeled. Spotify and YouTube columns show imported lifetime totals.
+- **RSS audio downloads:** Counts an episode once for each normalized IP address and user agent pair in a rolling 24-hour window, after enough unique bytes are served to cover its measured ID3 header and approximately one minute of audio. IPv4 addresses are canonicalized; IPv4-mapped IPv6 addresses use their IPv4 form, and other IPv6 addresses are truncated to /64 before hashing. Reassembled range requests count once. HEAD, two-byte probes, common bots, and watchOS duplicates are excluded. The dashboard shows first-24-hour, first-7-day, first-30-day, and recorded lifetime counts for each episode, plus an episode comparison chart for the first 30 days. Windows start at the publication timestamp in the RSS metadata; date-only publications use midnight UTC. Completed windows retain their totals. Unavailable history is shown as a dash; partially observed windows and windows still collecting are labeled. Spotify and YouTube columns show imported lifetime totals.
 - **YouTube:** Authorized channel reports provide daily video views and watch minutes. These remain separate from audio downloads.
 - **Spotify:** A creator-exported CSV provides plays or streams. These remain separate from audio downloads. Spotify's public Web API does not provide creator analytics.
 
@@ -26,7 +26,7 @@ The local `analytics/compose.yaml` is for development only. Copy `.env.example` 
 
 ## Historical data
 
-- YouTube sync queries from the earliest episode date, with pagination. The first successful sync backfills available daily views and watch minutes for matching video IDs.
+- YouTube sync queries from the earliest episode date, with a filter for the episode video IDs, stable day/video sorting, and pagination. Requests use the read-only `https://www.googleapis.com/auth/yt-analytics.readonly` OAuth scope. The first successful sync backfills available daily views and watch minutes for matching video IDs.
 - Spotify for Creators exports CSV on the web. Import each exported chart with explicit column names; example:
 
   ```sh
