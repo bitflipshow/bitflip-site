@@ -1,0 +1,34 @@
+name: Test podcast analytics
+
+on:
+  pull_request:
+    paths:
+      - 'analytics/**'
+      - 'worker/**'
+      - 'src/pages/analytics-manifest.json.js'
+      - 'episodes/**'
+      - '.github/workflows/test_analytics.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'analytics/**'
+      - 'worker/**'
+      - 'src/pages/analytics-manifest.json.js'
+      - 'episodes/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run build
+      - run: node --test worker/worker.test.js
+      - run: python -m unittest discover -s analytics -p 'test_*.py'

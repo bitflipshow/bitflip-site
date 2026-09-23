@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+data/
+__pycache__/
+*.sqlite3*
+*.csv
+*.jsonl

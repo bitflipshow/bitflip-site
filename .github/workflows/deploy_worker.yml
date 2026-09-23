@@ -1,11 +1,13 @@
 name: Deploy Audio Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'worker/**'
   workflow_dispatch:
+    inputs:
+      deploy_audio:
+        description: Switch audio routing after the metrics service is healthy
+        type: boolean
+        default: false
+        required: true
 
 jobs:
   deploy:
@@ -17,21 +19,27 @@ jobs:
         with:
           node-version: 22
 
+      - name: Test audio Worker
+        run: node --test worker/worker.test.js
+
       - name: Install Wrangler
         run: npm install -g wrangler@latest
 
-      - name: Upload Secrets
+      - name: Provision private analytics event bucket
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          UMAMI_HOST: ${{ secrets.UMAMI_HOST }}
-          UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
         run: |
-          echo "$UMAMI_HOST" | wrangler secret put UMAMI_HOST --name bitflip-audio
-          echo "$UMAMI_WEBSITE_ID" | wrangler secret put UMAMI_WEBSITE_ID --name bitflip-audio
+          if ! wrangler r2 bucket info bitflip-analytics-events >/dev/null 2>&1; then
+            wrangler r2 bucket create bitflip-analytics-events
+          fi
+          if ! wrangler r2 bucket lifecycle list bitflip-analytics-events | grep -Fq expire-raw-events; then
+            wrangler r2 bucket lifecycle add bitflip-analytics-events expire-raw-events events/ --expire-days 2
+          fi
 
       - name: Deploy Worker
+        if: inputs.deploy_audio
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
