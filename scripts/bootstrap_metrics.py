@@ -43,7 +43,6 @@ try:
         'vault_metrics_r2_account_id': account,
         'vault_metrics_r2_access_key_id': created['id'],
         'vault_metrics_r2_secret_access_key': hashlib.sha256(created['value'].encode()).hexdigest(),
-        'vault_metrics_admin_password': secrets.token_hex(32),
         'vault_metrics_hash_secret': secrets.token_hex(32),
     }
     sealed = base64.b64encode(recipient.encrypt(json.dumps(values).encode())).decode()

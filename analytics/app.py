@@ -1,6 +1,5 @@
 """Private BitFlip download analytics service."""
 
-import base64
 from contextlib import closing
 import csv
 import hashlib
@@ -133,7 +132,8 @@ def live_size(url):
 
 def sync_manifest(db, source=None):
     source = source or os.environ["MANIFEST_URL"]
-    with urllib.request.urlopen(source, timeout=20) as response:
+    request = urllib.request.Request(source, headers={"User-Agent": "BitFlipAnalyticsManifest/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
         episodes = json.load(response)
     for episode in episodes:
         url = episode["audioUrl"]
@@ -456,16 +456,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def authorized_admin(self):
-        expected = base64.b64encode((os.environ["ADMIN_USER"] + ":" + os.environ["ADMIN_PASSWORD"]).encode()).decode()
-        if hmac.compare_digest(self.headers.get("Authorization", ""), "Basic " + expected):
-            return True
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="BitFlip analytics"')
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return False
-
     def do_GET(self):
         if self.path == "/health":
             try:
@@ -475,7 +465,7 @@ class Handler(BaseHTTPRequestHandler):
                     poll = db.execute("SELECT succeeded_at,error FROM sync_state WHERE source='r2'").fetchone()
                 fresh = bool(poll and poll["succeeded_at"] and time.time() - poll["succeeded_at"] < 900)
                 ready = episode_count > 0 and fresh
-                status = 200 if ready or time.time() - SERVICE_STARTED < 900 else 503
+                status = 200 if ready else 503
                 body = {"episodes": episode_count, "r2_poll_fresh": fresh,
                         "last_r2_poll": poll["succeeded_at"] if poll else None,
                         "last_error": poll["error"] if poll else None}
@@ -485,8 +475,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path not in ("/", "/api/summary"):
             self.send(404, "not found")
-            return
-        if not self.authorized_admin():
             return
         with closing(connect()) as db:
             data = summary(db)
@@ -545,7 +533,7 @@ def main():
         elif command == "import-events":
             print(f"Imported {import_events(db, sys.argv[2])} historical events")
         elif command == "serve":
-            for key in ("ADMIN_USER", "ADMIN_PASSWORD", "HASH_SECRET", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
+            for key in ("HASH_SECRET", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
                 if not os.getenv(key) or os.environ[key].startswith("replace-with"):
                     raise SystemExit(f"Set {key} before serving")
             threading.Thread(target=background_sync, daemon=True).start()

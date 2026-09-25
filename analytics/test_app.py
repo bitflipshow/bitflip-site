@@ -108,6 +108,17 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT count(*) FROM downloads").fetchone()[0], 1)
         self.assertEqual(len(client.deleted), 2)
 
+    def test_manifest_identifies_collector_and_preserves_publication_time(self):
+        manifest = [{"number": 15, "title": "Episode 15", "published": "2023-11-14T22:13:20Z",
+                     "audioUrl": "https://audio.example/episode.mp3", "audioSize": 2000000,
+                     "duration": "2:00", "youtubeUrl": "https://youtu.be/video15"}]
+        def fetch(request, **kwargs):
+            self.assertEqual(request.get_header("User-agent"), "BitFlipAnalyticsManifest/1.0")
+            return io.BytesIO(json.dumps(manifest).encode())
+        with patch.object(app.urllib.request, "urlopen", side_effect=fetch), patch.object(app, "live_size", return_value=2000000), patch.object(app, "header_size", return_value=10000):
+            self.assertEqual(app.sync_manifest(self.db, "https://bitflip.show/analytics-manifest.json"), 1)
+        self.assertEqual(self.db.execute("SELECT published FROM episodes").fetchone()[0], "2023-11-14T22:13:20Z")
+
     def test_ipv6_rotation_and_mapped_ipv4_dedupe(self):
         self.assertEqual(app.ingest(self.db, self.event(ip="2001:db8:abcd:12::1"), self.now), "counted")
         self.assertEqual(app.ingest(self.db, self.event(ip="2001:0db8:abcd:0012::2"), self.now + 1), "duplicate")
