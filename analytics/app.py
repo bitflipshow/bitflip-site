@@ -133,7 +133,8 @@ def live_size(url):
 
 def sync_manifest(db, source=None):
     source = source or os.environ["MANIFEST_URL"]
-    with urllib.request.urlopen(source, timeout=20) as response:
+    request = urllib.request.Request(source, headers={"User-Agent": "BitFlipAnalyticsManifest/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
         episodes = json.load(response)
     for episode in episodes:
         url = episode["audioUrl"]
@@ -475,7 +476,7 @@ class Handler(BaseHTTPRequestHandler):
                     poll = db.execute("SELECT succeeded_at,error FROM sync_state WHERE source='r2'").fetchone()
                 fresh = bool(poll and poll["succeeded_at"] and time.time() - poll["succeeded_at"] < 900)
                 ready = episode_count > 0 and fresh
-                status = 200 if ready or time.time() - SERVICE_STARTED < 900 else 503
+                status = 200 if ready else 503
                 body = {"episodes": episode_count, "r2_poll_fresh": fresh,
                         "last_r2_poll": poll["succeeded_at"] if poll else None,
                         "last_error": poll["error"] if poll else None}
