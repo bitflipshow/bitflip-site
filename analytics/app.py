@@ -1,6 +1,5 @@
 """Private BitFlip download analytics service."""
 
-import base64
 from contextlib import closing
 import csv
 import hashlib
@@ -457,16 +456,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def authorized_admin(self):
-        expected = base64.b64encode((os.environ["ADMIN_USER"] + ":" + os.environ["ADMIN_PASSWORD"]).encode()).decode()
-        if hmac.compare_digest(self.headers.get("Authorization", ""), "Basic " + expected):
-            return True
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="BitFlip analytics"')
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return False
-
     def do_GET(self):
         if self.path == "/health":
             try:
@@ -486,8 +475,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path not in ("/", "/api/summary"):
             self.send(404, "not found")
-            return
-        if not self.authorized_admin():
             return
         with closing(connect()) as db:
             data = summary(db)
@@ -546,7 +533,7 @@ def main():
         elif command == "import-events":
             print(f"Imported {import_events(db, sys.argv[2])} historical events")
         elif command == "serve":
-            for key in ("ADMIN_USER", "ADMIN_PASSWORD", "HASH_SECRET", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
+            for key in ("HASH_SECRET", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
                 if not os.getenv(key) or os.environ[key].startswith("replace-with"):
                     raise SystemExit(f"Set {key} before serving")
             threading.Thread(target=background_sync, daemon=True).start()
