@@ -274,7 +274,7 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
         where = "(instr(lower(title), lower(?))>0 OR CAST(number AS TEXT)=?)"
         parameters = [query, query.lstrip("#")]
     total = db.execute(f"SELECT count(*) FROM episodes WHERE {where}", parameters).fetchone()[0]
-    rows = db.execute(f"""SELECT e.number,e.title,e.published,p.views AS youtube_public_views,
+    rows = db.execute(f"""SELECT e.number,e.title,e.published,e.duration_seconds,p.views AS youtube_public_views,
         p.observed_at AS youtube_public_observed_at FROM episodes e
         LEFT JOIN youtube_public p ON p.episode=e.number AND p.video_id=e.youtube_id WHERE {where}
         ORDER BY julianday(published) DESC,number DESC LIMIT ? OFFSET ?""",
