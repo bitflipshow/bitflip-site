@@ -1,11 +1,31 @@
 name: Deploy Audio Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'worker/**'
   workflow_dispatch:
+    inputs:
+      deploy_audio:
+        description: Switch audio routing after the metrics service is healthy
+        type: boolean
+        default: false
+        required: true
+
+      bootstrap_credentials:
+        description: Create the restricted metrics key and encrypted credential handoff
+        type: boolean
+        default: false
+      infra_public_key:
+        description: Public Actions secrets key from bitflipshow/bitflip-infra (not a secret)
+        type: string
+      infra_key_id:
+        description: ID of the infra repository public key
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bitflip-audio-provisioning
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -17,21 +37,59 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Wrangler
-        run: npm install -g wrangler@latest
+      - name: Test audio Worker
+        run: node --test worker/worker.test.js
 
-      - name: Upload Secrets
+      - name: Install Wrangler
+        run: npm install -g wrangler@4.139.0
+
+      - name: Provision private analytics event bucket
         working-directory: worker
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_METRICS_BOOTSTRAP_TOKEN || secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          UMAMI_HOST: ${{ secrets.UMAMI_HOST }}
-          UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
         run: |
-          echo "$UMAMI_HOST" | wrangler secret put UMAMI_HOST --name bitflip-audio
-          echo "$UMAMI_WEBSITE_ID" | wrangler secret put UMAMI_WEBSITE_ID --name bitflip-audio
+          wrangler r2 bucket list >/dev/null
+          if ! wrangler r2 bucket info bitflip-analytics-events >/dev/null 2>&1; then
+            wrangler r2 bucket create bitflip-analytics-events
+          fi
+          if ! wrangler r2 bucket lifecycle list bitflip-analytics-events | grep -Fq expire-raw-events; then
+            wrangler r2 bucket lifecycle add bitflip-analytics-events expire-raw-events events/ --expire-days 2
+          fi
+
+      - name: Verify event bucket privacy
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_METRICS_BOOTSTRAP_TOKEN || secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          wrangler r2 bucket dev-url disable bitflip-analytics-events --force
+          wrangler r2 bucket domain list bitflip-analytics-events
+
+      - name: Install credential sealing dependency
+        if: inputs.bootstrap_credentials
+        run: pip install PyNaCl==1.6.0
+
+      - name: Create restricted metrics credentials
+        if: inputs.bootstrap_credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_METRICS_BOOTSTRAP_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          INFRA_PUBLIC_KEY: ${{ inputs.infra_public_key }}
+          INFRA_KEY_ID: ${{ inputs.infra_key_id }}
+        run: python scripts/bootstrap_metrics.py
+
+      - name: Upload encrypted credential handoff
+        if: inputs.bootstrap_credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-secret-sealed
+          path: metrics-secret.sealed.json
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Deploy Worker
+        if: inputs.deploy_audio
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
