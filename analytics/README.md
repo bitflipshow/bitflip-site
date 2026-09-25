@@ -5,10 +5,18 @@ This service keeps podcast download counts in SQLite on `infra-svcs` and serves 
 ## Metrics
 
 - **RSS audio downloads:** Counts an episode once for each normalized IP address and user agent pair in a rolling 24-hour window, after enough unique bytes are served to cover its measured ID3 header and approximately one minute of audio. IPv4 addresses are canonicalized; IPv4-mapped IPv6 addresses use their IPv4 form, and other IPv6 addresses are truncated to /64 before hashing. Reassembled range requests count once. HEAD, two-byte probes, common bots, and watchOS duplicates are excluded. The dashboard shows first-24-hour, first-7-day, first-30-day, and recorded lifetime counts for each episode, plus an episode comparison chart for the first 30 days. Windows start at the publication timestamp in the RSS metadata; date-only publications use midnight UTC. Completed windows retain their totals. Unavailable history is shown as a dash; partially observed windows and windows still collecting are labeled. Spotify and YouTube columns show imported lifetime totals.
-- **YouTube:** Authorized channel reports provide daily video views and watch minutes. These remain separate from audio downloads.
+- **YouTube:** Public lifetime view snapshots refresh daily without credentials using pinned yt-dlp. Each count has a last-checked timestamp; failures retain previous counts, and changed video IDs invalidate old snapshots. The refresh runs separately so it cannot delay audio event ingestion. Public counts cannot reconstruct historical release windows. Authorized channel reports provide daily video views and watch minutes. These remain separate from audio downloads.
 - **Spotify:** A creator-exported CSV provides plays or streams. These remain separate from audio downloads. Spotify's public Web API does not provide creator analytics.
 
 This implementation is **not IAB certified**. It follows selected [IAB v2.2 measurement rules](https://iabtechlab.com/wp-content/uploads/2024/02/PodcastMeasurement_v2.2_final.pdf), but its one-minute threshold uses average episode bitrate, and its bot filter needs ongoing review. The count represents file delivery, not a confirmed listen. A disconnect after bytes leave the Worker may still be counted if the bytes already meet the threshold.
+
+## Browsing the catalogue
+
+The home page automatically shows the latest 10 episodes by publication date. This is a display limit only: every episode keeps collecting downloads and its history is retained.
+
+`/episodes` is the searchable archive, with 25 episodes per page and comparison charts for first 24 hours, first 7 days, first 30 days, or recorded lifetime. `/episodes/<number>` is a permanent per-episode page with all four milestone charts and separate platform totals. There are no daily aggregate views.
+
+The JSON endpoints mirror these views: `/api/summary` returns the latest 10, `/api/episodes?page=2&q=title` returns a bounded archive page, and `/api/episodes/<number>` returns one episode. Responses include total matches, offset, and page size. Historical totals use grouped queries and episode/time indexes rather than issuing a separate query for each metric of every episode.
 
 ## Deployment
 
@@ -52,3 +60,9 @@ After rollout, revoke the temporary Cloudflare bootstrap token and remove its Gi
 - Back up the SQLite database with `sqlite3 /opt/appdata/apps/metrics/data/analytics.sqlite3 '.backup /path/to/backup.sqlite3'` from the host. Restore with the service stopped. Keep the hash secret stable across restarts or rolling deduplication will reset.
 - Inspect container logs for `R2 poll failed`, `Manifest sync failed`, or `YouTube sync failed`. If the event bucket grows beyond five minutes of traffic, check R2 credentials, manifest availability, and network access from `infra-svcs` to Cloudflare. If the bucket reaches the two-day expiration, unprocessed events are permanently lost.
 - Source metric differences are expected. YouTube views, Spotify plays, and RSS downloads have different definitions and can include the same listener. Do not sum them into an audience total.
+
+### Public YouTube counts
+
+Run `python -m app sync-youtube-public` for an immediate refresh. The background loop checks every six hours and refreshes snapshots older than 24 hours. Failed pages retry at the next check, with existing snapshots retained and dated. If YouTube blocks the server or changes its page format, inspect `Public YouTube sync failed` and update the pinned extractor as needed. This public-page integration has no availability guarantee.
+
+For a snapshot collected elsewhere, `python -m app import-youtube-public /data/snapshots.json` accepts a JSON array of `video_id`, integer `views`, and Unix `observed_at`. Only videos in the manifest are accepted; older snapshots cannot overwrite newer ones. Public totals are never added to daily Analytics reports or audio downloads. Spotify has no public counts in this integration; its columns remain unavailable without a creator export.

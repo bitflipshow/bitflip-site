@@ -2,6 +2,8 @@ import os
 import tempfile
 import json
 import io
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -17,6 +19,7 @@ class AnalyticsTests(unittest.TestCase):
         self.db = app.connect()
         self.db.execute("DELETE FROM processed_events")
         self.db.execute("DELETE FROM platform_daily")
+        self.db.execute("DELETE FROM youtube_public")
         self.db.execute("DELETE FROM sessions")
         self.db.execute("DELETE FROM downloads")
         self.db.execute("DELETE FROM episodes")
@@ -175,6 +178,91 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(data["episodes"][0]["window_status"],
                          {"24h": "unavailable", "7d": "partial history", "30d": "partial history"})
         self.assertIn("partial history", app.dashboard(data))
+
+    def test_public_snapshot_is_separate_and_newest_wins(self):
+        app.save_youtube_public(self.db, "video15", 100, self.now)
+        app.save_youtube_public(self.db, "video15", 120, self.now + 10)
+        app.save_youtube_public(self.db, "video15", 90, self.now - 10)
+        episode = app.summary(self.db)["episodes"][0]
+        self.assertEqual(episode["youtube_public_views"], 120)
+        self.assertEqual(episode["lifetime"], 0)
+        self.assertNotIn("youtube_views", episode)
+        with self.assertRaises(ValueError):
+            app.save_youtube_public(self.db, "unknown", 100, self.now)
+        with self.assertRaises(ValueError):
+            app.save_youtube_public(self.db, "video15", -1, self.now)
+        self.db.execute("UPDATE episodes SET youtube_id='replacement' WHERE number=15")
+        self.assertIsNone(app.summary(self.db)["episodes"][0]["youtube_public_views"])
+
+    def test_public_refresh_retains_data_on_failure(self):
+        app.save_youtube_public(self.db, "video15", 100, self.now)
+        with patch("app.subprocess.run", side_effect=app.subprocess.TimeoutExpired("yt-dlp", 60)):
+            with self.assertRaises(ValueError):
+                app.sync_youtube_public(self.db)
+        self.assertEqual(app.summary(self.db)["episodes"][0]["youtube_public_views"], 100)
+        result = type("Result", (), {"stdout": json.dumps({"id": "video15", "view_count": 130})})()
+        with patch("app.subprocess.run", return_value=result) as run:
+            self.assertEqual(app.sync_youtube_public(self.db), 1)
+            self.assertEqual(app.sync_youtube_public(self.db), 0)
+            self.assertEqual(run.call_count, 1)
+        self.assertEqual(app.summary(self.db)["episodes"][0]["youtube_public_views"], 130)
+
+    def populate_archive(self):
+        for number in range(60):
+            if number == 15:
+                continue
+            published = datetime.fromtimestamp(self.now + number * app.DAY, timezone.utc).isoformat()
+            self.db.execute("INSERT INTO episodes VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (number, f"Episode {number}", published, f"episode-{number}.mp3",
+                             f"https://audio.example/{number}.mp3", 2000000, 120, 10000, 995000, None))
+        self.db.commit()
+
+    def test_archive_queries_preserve_old_totals_and_bound_work(self):
+        self.populate_archive()
+        app.process_event(self.db, "events/old", {**self.event(), "timestamp": self.now})
+        statements = []
+        self.db.set_trace_callback(statements.append)
+        recent = app.summary(self.db, self.now + 100 * app.DAY, limit=10)
+        self.db.set_trace_callback(None)
+        self.assertEqual([e["number"] for e in recent["episodes"]], list(range(59, 49, -1)))
+        self.assertEqual(recent["total"], 60)
+        self.assertLessEqual(len(statements), 6)
+        pages = [app.summary(self.db, limit=25, offset=offset)["episodes"] for offset in (0, 25, 50)]
+        self.assertEqual([len(page) for page in pages], [25, 25, 10])
+        self.assertEqual(len({e["number"] for page in pages for e in page}), 60)
+        old = app.summary(self.db, number=15, limit=1)["episodes"][0]
+        self.assertEqual(old["lifetime"], 1)
+        self.assertEqual(app.summary(self.db, query="#15", limit=25)["total"], 1)
+
+    def test_http_recent_archive_detail_and_invalid_navigation(self):
+        self.populate_archive()
+        server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            def fetch(path):
+                with app.urllib.request.urlopen(base + path) as response:
+                    return response.read().decode()
+            self.assertEqual(len(json.loads(fetch("/api/summary"))["episodes"]), 10)
+            self.assertEqual(len(json.loads(fetch("/api/episodes?page=3"))["episodes"]), 10)
+            home = fetch("/")
+            self.assertEqual(home.count('data-episode="'), 10)
+            self.assertNotIn('data-episode="0"', home)
+            self.assertIn('Download milestones', fetch("/episodes/0"))
+            self.assertIn('data-episode="0"', fetch("/episodes?q=%230"))
+            self.assertIn('No episodes found', fetch("/episodes?q=%3Cscript%3E"))
+            self.assertNotIn('<script>', fetch("/episodes?q=%3Cscript%3E"))
+            for path, code in (("/episodes?page=-1", 400), ("/episodes?page=no", 400),
+                               ("/episodes?page=100", 404), ("/episodes/999", 404)):
+                with self.assertRaises(app.urllib.error.HTTPError) as failure:
+                    fetch(path)
+                self.assertEqual(failure.exception.code, code)
+                failure.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_privacy_cleanup_removes_old_identifiers(self):
         self.assertEqual(app.ingest(self.db, self.event(), self.now), "counted")
