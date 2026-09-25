@@ -179,3 +179,11 @@ footer{padding:10px 14px 18px}
 .bar-number{opacity:0}
 .chart-column:hover .bar-number{opacity:1}
 
+
+/* Use the podcast’s source logo without stretching or cropping it. */
+.brand{display:flex;align-items:center;gap:10px}
+.podcast-logo{display:block;width:28px;height:auto;flex:none}
+.brand-name{font-size:25px;letter-spacing:-.7px}
+.brand-sub{font-size:8px;letter-spacing:1.5px}
+@media(max-width:1100px){.brand{gap:8px}.brand-name{font-size:22px}.podcast-logo{width:25px}}
+@media(max-width:760px){.brand{gap:7px}.brand-name{font-size:20px}.podcast-logo{width:21px}.brand-sub{display:none}}

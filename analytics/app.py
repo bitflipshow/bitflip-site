@@ -502,6 +502,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path == "/podcast-logo.png":
+            self.send(200, Path(__file__).with_name("podcast-logo.png").read_bytes(), "image/png")
+            return
         if self.path == "/health":
             try:
                 with closing(connect()) as db:

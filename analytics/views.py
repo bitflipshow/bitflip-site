@@ -133,7 +133,7 @@ def dashboard(data, mode='recent', metric='lifetime'):
     active_recent = ' aria-current="page"' if mode == 'recent' else ''
     active_archive = ' aria-current="page"' if mode != 'recent' else ''
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · BitFlip metrics</title><style>{CSS}</style></head><body>
-<a class="skip" href="#main">Skip to metrics</a><aside class="sidebar"><a class="brand" href="/"><span class="brand-name">bitflip<span class="brand-dot">.</span></span><span class="brand-sub">PODCAST ANALYTICS</span></a>
+<a class="skip" href="#main">Skip to metrics</a><aside class="sidebar"><a class="brand" href="/"><img class="podcast-logo" src="/podcast-logo.png" alt="BitFlip podcast logo" width="28" height="41"><span class="brand-copy"><span class="brand-name">BitFlip</span><span class="brand-sub">ANALYTICS</span></span></a>
 <div class="nav-label">WORKSPACE</div><nav aria-label="Main"><a href="/"{active_recent}>Overview<span>10</span></a><a href="/episodes"{active_archive}>Episodes<span>All</span></a></nav>
 <div class="nav-label links-label">QUICK LINKS</div><nav><a href="https://bitflip.show" target="_blank" rel="noreferrer">Podcast website</a><a href="#data-notes">About these metrics</a></nav><div class="sidebar-bottom"><span>Private workspace</span><small>BitFlip tailnet</small></div></aside>
 <div class="workspace"><header class="topbar"><div class="breadcrumb">BitFlip <span>/</span> Metrics <span>/</span> <strong>{esc(scope)}</strong></div><span class="private-badge">TAILNET ONLY</span></header><main id="main">
