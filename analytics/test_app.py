@@ -252,7 +252,7 @@ class AnalyticsTests(unittest.TestCase):
             self.assertIn('Download milestones', fetch("/episodes/0"))
             self.assertIn('data-episode="0"', fetch("/episodes?q=%230"))
             self.assertIn('No episodes found', fetch("/episodes?q=%3Cscript%3E"))
-            self.assertNotIn('<script>', fetch("/episodes?q=%3Cscript%3E"))
+            self.assertIn('value="&lt;script&gt;"', fetch("/episodes?q=%3Cscript%3E"))
             for path, code in (("/episodes?page=-1", 400), ("/episodes?page=no", 400),
                                ("/episodes?page=100", 404), ("/episodes/999", 404)):
                 with self.assertRaises(app.urllib.error.HTTPError) as failure:
