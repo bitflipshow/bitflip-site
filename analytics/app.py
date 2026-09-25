@@ -4,12 +4,12 @@ from contextlib import closing
 import csv
 import hashlib
 import hmac
-import html
 import json
 import ipaddress
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -19,6 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from views import dashboard
 
 
 DB_PATH = os.getenv("DB_PATH", "/data/analytics.sqlite3")
@@ -50,16 +51,22 @@ def connect():
             fingerprint TEXT, ip_hash TEXT
         );
         CREATE INDEX IF NOT EXISTS downloads_time ON downloads(counted_at);
+        CREATE INDEX IF NOT EXISTS downloads_episode_time ON downloads(episode, counted_at);
         CREATE INDEX IF NOT EXISTS downloads_dedupe ON downloads(episode, fingerprint, counted_at);
         CREATE TABLE IF NOT EXISTS platform_daily (
             platform TEXT NOT NULL, metric TEXT NOT NULL, day TEXT NOT NULL,
             episode INTEGER NOT NULL, value REAL NOT NULL,
             PRIMARY KEY(platform, metric, day, episode)
         );
+        CREATE TABLE IF NOT EXISTS youtube_public (
+            episode INTEGER PRIMARY KEY, video_id TEXT NOT NULL,
+            views INTEGER NOT NULL CHECK(views>=0), observed_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS processed_events (
             key TEXT PRIMARY KEY, processed_at INTEGER NOT NULL,
             event_timestamp INTEGER
         );
+        CREATE INDEX IF NOT EXISTS platform_episode_day ON platform_daily(episode, day);
         CREATE TABLE IF NOT EXISTS sync_state (
             source TEXT PRIMARY KEY, succeeded_at INTEGER, error TEXT
         );
@@ -67,6 +74,7 @@ def connect():
     columns = {row[1] for row in db.execute("PRAGMA table_info(processed_events)")}
     if "event_timestamp" not in columns:
         db.execute("ALTER TABLE processed_events ADD COLUMN event_timestamp INTEGER")
+    db.execute("CREATE INDEX IF NOT EXISTS processed_event_time ON processed_events(event_timestamp)")
     return db
 
 
@@ -254,35 +262,58 @@ def mark_sync(db, source, error=None):
                 ON CONFLICT(source) DO UPDATE SET error=excluded.error""", (source, str(error)[:500]))
 
 
-def summary(db, now=None):
+def summary(db, now=None, limit=None, offset=0, query="", number=None):
+    """Read a bounded episode selection with constant query count as the archive grows."""
     now = int(now if now is not None else time.time())
     windows = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY}
     first_event = db.execute("SELECT min(event_timestamp) FROM processed_events WHERE event_timestamp IS NOT NULL").fetchone()[0]
+    where, parameters = "1=1", []
+    if number is not None:
+        where, parameters = "number=?", [number]
+    elif query:
+        where = "(instr(lower(title), lower(?))>0 OR CAST(number AS TEXT)=?)"
+        parameters = [query, query.lstrip("#")]
+    total = db.execute(f"SELECT count(*) FROM episodes WHERE {where}", parameters).fetchone()[0]
+    rows = db.execute(f"""SELECT e.number,e.title,e.published,p.views AS youtube_public_views,
+        p.observed_at AS youtube_public_observed_at FROM episodes e
+        LEFT JOIN youtube_public p ON p.episode=e.number AND p.video_id=e.youtube_id WHERE {where}
+        ORDER BY julianday(published) DESC,number DESC LIMIT ? OFFSET ?""",
+        [*parameters, limit if limit is not None else -1, offset]).fetchall()
+    ids = [row["number"] for row in rows]
+    counts_by_episode, external_by_episode = {}, {}
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        for row in db.execute(f"""SELECT d.episode, count(*) AS lifetime,
+            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+86400) AS '24h',
+            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+604800) AS '7d',
+            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+2592000) AS '30d'
+            FROM downloads d JOIN episodes e ON e.number=d.episode
+            WHERE d.episode IN ({placeholders}) AND d.counted_at<=? GROUP BY d.episode""", [*ids, now]):
+            counts_by_episode[row["episode"]] = dict(row)
+        for episode, platform, metric, value in db.execute(f"""SELECT episode,platform,metric,sum(value)
+            FROM platform_daily WHERE episode IN ({placeholders}) AND day<=date(?,'unixepoch')
+            GROUP BY episode,platform,metric""", [*ids, now]):
+            external_by_episode.setdefault(episode, {})[f"{platform}_{metric}"] = value
     episodes = []
-    for row in db.execute("SELECT number,title,published FROM episodes ORDER BY published DESC,number DESC"):
+    for row in rows:
         published = datetime.fromisoformat(row["published"].replace("Z", "+00:00"))
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
         start = int(published.timestamp())
-        counts, states = {}, {}
+        counts = counts_by_episode.get(row["number"], dict.fromkeys([*windows, "lifetime"], 0))
+        states = {}
         for name, seconds in windows.items():
             end = start + seconds
-            counts[name] = db.execute("""SELECT count(*) FROM downloads WHERE episode=?
-                AND counted_at>=? AND counted_at<? AND counted_at<=?""",
-                (row["number"], start, end, now)).fetchone()[0]
             if first_event is None or first_event >= end or now < start:
                 states[name] = "unavailable"
             elif first_event > start:
                 states[name] = "partial history"
             else:
                 states[name] = "complete" if now >= end else "collecting"
-        counts["lifetime"] = db.execute("SELECT count(*) FROM downloads WHERE episode=? AND counted_at<=?",
-                                       (row["number"], now)).fetchone()[0]
-        external = {f"{platform}_{metric}": value for platform, metric, value in db.execute("""
-            SELECT platform,metric,sum(value) FROM platform_daily WHERE episode=?
-            AND day<=date(?,'unixepoch') GROUP BY platform,metric""", (row["number"], now))}
-        episodes.append({**dict(row), **counts, **external, "window_status": states})
-    return {"episodes": episodes, "coverage_start": first_event}
+        episodes.append({**dict(row), **{key: counts[key] for key in [*windows, "lifetime"]},
+                         **external_by_episode.get(row["number"], {}), "window_status": states})
+    return {"episodes": episodes, "coverage_start": first_event, "total": total, "offset": offset,
+            "page_size": limit, "query": query}
 
 
 def import_spotify(db, path, metric, date_column, value_column, episode_column=None):
@@ -364,6 +395,64 @@ def import_events(db, path):
     return imported
 
 
+def save_youtube_public(db, video_id, views, observed_at):
+    """Store a lifetime snapshot, never a daily increment or a download."""
+    if not isinstance(views, int) or isinstance(views, bool) or views < 0:
+        raise ValueError("public views must be a nonnegative integer")
+    episode = db.execute("SELECT number FROM episodes WHERE youtube_id=?", (video_id,)).fetchone()
+    if episode is None:
+        raise ValueError("video is not in the episode manifest")
+    with db:
+        db.execute("""INSERT INTO youtube_public VALUES(?,?,?,?)
+            ON CONFLICT(episode) DO UPDATE SET video_id=excluded.video_id,
+            views=excluded.views,observed_at=excluded.observed_at
+            WHERE excluded.observed_at>=youtube_public.observed_at""",
+            (episode[0], video_id, views, observed_at))
+
+
+def sync_youtube_public(db):
+    """Refresh public counts without account credentials or media downloads."""
+    now = int(time.time())
+    videos = db.execute("""SELECT e.youtube_id FROM episodes e LEFT JOIN youtube_public p
+        ON p.episode=e.number AND p.video_id=e.youtube_id WHERE e.youtube_id IS NOT NULL
+        AND (p.observed_at IS NULL OR p.observed_at<?)""", (now - DAY,)).fetchall()
+    count, failed = 0, 0
+    for (video_id,) in videos:
+        try:
+            result = subprocess.run(["yt-dlp", "--skip-download", "--no-playlist", "--print",
+                "%(.{id,view_count})j", "https://www.youtube.com/watch?v=" + video_id],
+                capture_output=True, text=True, timeout=60, check=True)
+            data = json.loads(result.stdout)
+            if data["id"] != video_id:
+                raise ValueError("video identity mismatch")
+            save_youtube_public(db, video_id, data["view_count"], int(time.time()))
+            count += 1
+        except (subprocess.SubprocessError, ValueError, KeyError, OSError):
+            failed += 1
+    if failed:
+        raise ValueError(f"Public YouTube refresh failed for {failed} videos; previous snapshots retained")
+    return count
+
+
+def public_youtube_loop():
+    # A separate connection/thread keeps slow public pages from delaying R2 collection.
+    while True:
+        try:
+            with closing(connect()) as db:
+                if db.execute("SELECT count(*) FROM episodes").fetchone()[0] == 0:
+                    time.sleep(30)
+                    continue
+                try:
+                    sync_youtube_public(db)
+                    mark_sync(db, "youtube_public")
+                except Exception as error:
+                    mark_sync(db, "youtube_public", error)
+                    print(f"Public YouTube sync failed: {error}", file=sys.stderr, flush=True)
+        except Exception as error:
+            print(f"Public YouTube loop failed: {error}", file=sys.stderr, flush=True)
+        time.sleep(6 * 3600)
+
+
 def sync_youtube(db):
     data = urllib.parse.urlencode({"client_id": os.environ["YOUTUBE_CLIENT_ID"],
         "client_secret": os.environ["YOUTUBE_CLIENT_SECRET"], "refresh_token": os.environ["YOUTUBE_REFRESH_TOKEN"],
@@ -402,50 +491,6 @@ def sync_youtube(db):
     return count
 
 
-def episode_chart(episodes):
-    peak = max([episode["30d"] for episode in episodes] + [1])
-    bars = []
-    for index, episode in enumerate(episodes):
-        y = 8 + index * 30
-        label = f'#{episode["number"]} {episode["title"]}'
-        status = episode["window_status"]["30d"]
-        value = "—" if status == "unavailable" else f'{episode["30d"]:,}'
-        if status not in ("complete", "unavailable"):
-            value += " (" + status + ")"
-        bars.append(f'<text x="0" y="{y + 16}">{html.escape(label[:42])}</text>'
-                    f'<rect x="310" y="{y}" width="{(0 if status == "unavailable" else episode["30d"]) / peak * 330:.1f}" height="20"><title>{html.escape(label)}: {episode["30d"]} downloads in first 30 days; {status}</title></rect>'
-                    f'<text x="650" y="{y + 16}">{value}</text>')
-    height = 16 + len(episodes) * 30
-    return f'<svg viewBox="0 0 880 {height}" role="img" aria-label="First 30 days of downloads by episode">{"".join(bars)}</svg>'
-
-
-def dashboard(data):
-    def metric(episode, key):
-        value = episode.get(key)
-        return f"{value:,.0f}" if value is not None else "—"
-    def downloads(episode, key):
-        if data["coverage_start"] is None:
-            return "—"
-        status = episode["window_status"].get(key, "complete")
-        if status == "unavailable":
-            return "—"
-        suffix = f" <small>({status})</small>" if status != "complete" else ""
-        return f'{episode[key]:,}' + suffix
-    rows = "".join(f'<tr><td>#{e["number"]} {html.escape(e["title"])}</td><td>{downloads(e,"24h")}</td><td>{downloads(e,"7d")}</td><td>{downloads(e,"30d")}</td><td>{downloads(e,"lifetime")}</td><td>{metric(e,"spotify_plays")}</td><td>{metric(e,"spotify_streams")}</td><td>{metric(e,"youtube_views")}</td><td>{metric(e,"youtube_watch_minutes")}</td></tr>'
-                   for e in data["episodes"])
-    coverage = ("Earliest recorded audio event: " + datetime.fromtimestamp(data["coverage_start"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-                if data["coverage_start"] is not None else "No audio events recorded yet")
-    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BitFlip analytics</title><style>body{{font:16px system-ui;max-width:1100px;margin:auto;padding:2rem;background:#10171d;color:#e9f2f5}}
-h1,h2{{color:#fff}}small{{color:#afc4cd}}svg{{width:100%;height:auto;background:#1d2d36;border-radius:.6rem}}svg rect{{fill:#69d5b0}}svg text{{fill:#d4e4e9;font:13px system-ui}}
-table{{border-collapse:collapse;width:100%}}th,td{{padding:.6rem;border-bottom:1px solid #38505c;text-align:right}}th:first-child,td:first-child{{text-align:left}}
-.scroll{{overflow-x:auto}}</style><h1>BitFlip analytics</h1><p>Qualified RSS audio downloads by episode. First 24 hours, 7 days, and 30 days after release (UTC).</p>
-<p>{html.escape(coverage)}. Lifetime download counts start at collection, unless older qualified logs are imported.</p>
-{f'<h2>First 30 days by episode</h2>{episode_chart(data["episodes"])}' if data["coverage_start"] is not None else ''}
-<h2>Episode metrics</h2><div class="scroll"><table><thead><tr><th>Episode</th><th>First 24h</th><th>First 7d</th><th>First 30d</th><th>Recorded lifetime downloads</th><th>Imported lifetime Spotify plays</th><th>Imported lifetime Spotify streams</th><th>Imported lifetime YouTube views</th><th>Imported lifetime YouTube watch minutes</th></tr></thead><tbody>{rows}</tbody></table></div>
-<small>Spotify and YouTube metrics have platform definitions. A dash means unavailable data. Partial history means collection started after release. Collecting means the release window is still open. Source interruptions can leave gaps; check collector health before comparing episodes.</small></html>'''
-
-
 class Handler(BaseHTTPRequestHandler):
     def send(self, status, body, content_type="text/plain; charset=utf-8"):
         body = body.encode() if isinstance(body, str) else body
@@ -473,15 +518,40 @@ class Handler(BaseHTTPRequestHandler):
             except sqlite3.Error:
                 self.send(503, "database unavailable")
             return
-        if self.path not in ("/", "/api/summary"):
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        params = urllib.parse.parse_qs(parsed.query)
+        detail = re.fullmatch(r"/(?:api/)?episodes/(\d+)", path)
+        archive = path in ("/episodes", "/api/episodes")
+        if path not in ("/", "/api/summary") and not archive and not detail:
             self.send(404, "not found")
             return
+        try:
+            page = int(params.get("page", ["1"])[0])
+            if page < 1 or page > 1_000_000:
+                raise ValueError
+        except ValueError:
+            self.send(400, "invalid page")
+            return
+        query = params.get("q", [""])[0].strip()[:200] if archive else ""
+        mode = "episode" if detail else "archive" if archive else "recent"
+        size = 1 if detail else 25 if archive else 10
         with closing(connect()) as db:
-            data = summary(db)
-        if self.path == "/api/summary":
+            data = summary(db, limit=size, offset=(page - 1) * size if archive else 0,
+                           query=query, number=int(detail[1]) if detail else None)
+        if detail and not data["episodes"]:
+            self.send(404, "episode not found")
+            return
+        if archive and page > 1 and not data["episodes"]:
+            self.send(404, "page not found")
+            return
+        if path.startswith("/api/"):
             self.send(200, json.dumps(data), "application/json; charset=utf-8")
         else:
-            self.send(200, dashboard(data), "text/html; charset=utf-8")
+            metric = params.get("metric", ["lifetime"])[0]
+            if metric not in ("24h", "7d", "30d", "lifetime"):
+                metric = "lifetime"
+            self.send(200, dashboard(data, mode=mode, metric=metric), "text/html; charset=utf-8")
 
 
 
@@ -524,6 +594,11 @@ def main():
     with closing(connect()) as db:
         if command == "sync-manifest":
             print(f"Synced {sync_manifest(db)} episodes")
+        elif command == "sync-youtube-public":
+            print(f"Synced {sync_youtube_public(db)} public YouTube snapshots")
+        elif command == "import-youtube-public":
+            for row in json.loads(Path(sys.argv[2]).read_text()):
+                save_youtube_public(db, row["video_id"], row["views"], row["observed_at"])
         elif command == "sync-youtube":
             print(f"Synced {sync_youtube(db)} YouTube daily rows")
         elif command == "pull-r2":
@@ -537,6 +612,7 @@ def main():
                 if not os.getenv(key) or os.environ[key].startswith("replace-with"):
                     raise SystemExit(f"Set {key} before serving")
             threading.Thread(target=background_sync, daemon=True).start()
+            threading.Thread(target=public_youtube_loop, daemon=True).start()
             ThreadingHTTPServer(("0.0.0.0", 8787), Handler).serve_forever()
         else:
             raise SystemExit(f"Unknown command: {command}")
