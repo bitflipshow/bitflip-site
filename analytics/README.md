@@ -24,6 +24,14 @@ Before deploying:
 
 The local `analytics/compose.yaml` is for development only. Copy `.env.example` to `.env`, set local values, and run `docker compose -f analytics/compose.yaml up --build`. The production service uses infra repo Compose and has no published port.
 
+## Credential provisioning
+
+The manual `Deploy Audio Worker` workflow supports `bootstrap_credentials=true` with the infra repository's Actions secrets public key and key ID. It uses `CF_METRICS_BOOTSTRAP_TOKEN` to provision the bucket and create the `bitflip-metrics-events` account token, scoped only to objects in the event bucket. It generates the dashboard password and hash secret, then exports only a GitHub-sealed credential bundle. It refuses to issue a second token with the same name; recover the previous encrypted artifact rather than rerunning token creation.
+
+The sealed payload is written to the infra repository's temporary `METRICS_BOOTSTRAP_JSON` secret through the GitHub API. Running its `Deploy infra-svcs` workflow with `configure_metrics_only=true` verifies R2 list/write/read/delete, confirms access to the audio bucket is denied, and exports the updated Ansible-encrypted vault. This mode does not deploy services. Commit the encrypted artifact as `group_vars/secrets.yaml`, then remove the temporary transfer secret. The workflow preserves existing vault entries and refuses to rotate an existing metrics value implicitly.
+
+After rollout, revoke the temporary Cloudflare bootstrap token and remove its GitHub secret. Future provisioning requires a suitably authorized token. The metrics runtime only uses the restricted R2 key stored in the vault.
+
 ## Historical data
 
 - YouTube sync queries from the earliest episode date, with a filter for the episode video IDs, stable day/video sorting, and pagination. Requests use the read-only `https://www.googleapis.com/auth/yt-analytics.readonly` OAuth scope. The first successful sync backfills available daily views and watch minutes for matching video IDs.
