@@ -401,6 +401,40 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIn("recovered", sent[1])
         self.assertFalse(app.check_alert(self.db, False, time.time() + app.ALERT_AFTER * 10, sent.append))
 
+    def add_second_video(self):
+        self.db.execute("""INSERT INTO episodes VALUES(16,'Episode 16','2023-11-20','episode-16.mp3',
+            'https://audio.example/16.mp3',2000000,120,10000,995000,'video16')""")
+        self.db.commit()
+
+    def test_one_broken_video_does_not_fail_public_refresh(self):
+        self.add_second_video()
+        def run(args, **_kwargs):
+            video = args[-1].rsplit("=", 1)[-1]
+            views = None if video == "video16" else 130
+            return type("Result", (), {"stdout": json.dumps({"id": video, "view_count": views})})()
+        with patch("app.subprocess.run", side_effect=run):
+            self.assertEqual(app.sync_youtube_public(self.db), 1)
+        views = {e["number"]: e["youtube_public_views"] for e in app.summary(self.db)["episodes"]}
+        self.assertEqual(views, {15: 130, 16: None})
+        with patch("app.subprocess.run", side_effect=app.subprocess.TimeoutExpired("yt-dlp", 60)):
+            with self.assertRaises(ValueError):
+                app.sync_youtube_public(self.db)  # only video16 is due, and it fails
+
+    def test_public_import_rejects_bad_timestamps_atomically(self):
+        self.add_second_video()
+        now = int(time.time())
+        for bad in (now + 3600, now * 1000, 0, "1700000000", True, 1.5):
+            with self.assertRaises(ValueError):
+                app.save_youtube_public(self.db, "video15", 100, bad)
+        with self.assertRaises(ValueError) as failure:
+            app.import_youtube_public(self.db, [{"video_id": "video15", "views": 100, "observed_at": now},
+                                                {"video_id": "video16", "views": 5, "observed_at": now * 1000}])
+        self.assertIn("row 2", str(failure.exception))
+        self.assertIsNone(self.db.execute("SELECT 1 FROM youtube_public").fetchone())
+        self.assertEqual(app.import_youtube_public(self.db, [{"video_id": "video15", "views": 100, "observed_at": now},
+                                                             {"video_id": "video16", "views": 5, "observed_at": now}]), 2)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM youtube_public").fetchone()[0], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
