@@ -36,7 +36,19 @@ The local `analytics/compose.yaml` is for development only. Copy `.env.example` 
 
 The manual `Deploy Audio Worker` workflow supports `bootstrap_credentials=true` with the infra repository's Actions secrets public key and key ID. It uses `CF_METRICS_BOOTSTRAP_TOKEN` to provision the bucket and create the `bitflip-metrics-events` account token, scoped only to objects in the event bucket. It generates the hash secret, then exports only a GitHub-sealed credential bundle. It refuses to issue a second token with the same name; recover the previous encrypted artifact rather than rerunning token creation.
 
-The sealed payload is written to the infra repository's temporary `METRICS_BOOTSTRAP_JSON` secret through the GitHub API. Running its `Deploy infra-svcs` workflow with `configure_metrics_only=true` verifies R2 list/write/read/delete, confirms access to the audio bucket is denied, and exports the updated Ansible-encrypted vault. This mode does not deploy services. Commit the encrypted artifact as `group_vars/secrets.yaml`, then remove the temporary transfer secret. The workflow preserves existing vault entries and refuses to rotate an existing metrics value implicitly.
+The workflow uploads the sealed payload as the `metrics-secret-sealed` artifact (kept 7 days); it does not write the secret itself. Download it and store it as the infra repository's temporary `METRICS_BOOTSTRAP_JSON` secret:
+
+```sh
+gh run download <run-id> -R bitflipshow/bitflip-site -n metrics-secret-sealed
+gh api -X PUT repos/bitflipshow/bitflip-infra/actions/secrets/METRICS_BOOTSTRAP_JSON \
+  -f encrypted_value="$(jq -r .encrypted_value metrics-secret.sealed.json)" \
+  -f key_id="$(jq -r .key_id metrics-secret.sealed.json)"
+rm metrics-secret.sealed.json
+```
+
+The payload is sealed to the infra repository's public key, so only GitHub Actions in that repository can decrypt it. Running its `Deploy infra-svcs` workflow with `configure_metrics_only=true` verifies R2 list/write/read/delete, confirms access to the audio bucket is denied, and exports the updated Ansible-encrypted vault. This mode does not deploy services. Commit the encrypted artifact as `group_vars/secrets.yaml`, then remove the temporary transfer secret. The workflow preserves existing vault entries and refuses to rotate an existing metrics value implicitly.
+
+If the token was created but the artifact is missing (the upload step failed, or the 7-day retention passed), the script refuses to run again. In the Cloudflare dashboard, open **Manage Account → Account API Tokens**, delete `bitflip-metrics-events`, and rerun the workflow with `bootstrap_credentials=true`. If the old credentials were already committed to the vault, the vault setup will refuse to overwrite them; remove the four `vault_metrics_r2_*`/`vault_metrics_hash_secret` entries first, knowing that a new hash secret resets rolling deduplication. If sealing itself fails, the script revokes the new token automatically.
 
 After rollout, revoke the temporary Cloudflare bootstrap token and remove its GitHub secret. Future provisioning requires a suitably authorized token. The metrics runtime only uses the restricted R2 key stored in the vault.
 
