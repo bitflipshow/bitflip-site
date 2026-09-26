@@ -30,10 +30,23 @@ SERVICE_STARTED = time.time()
 RELEASE_TZ = ZoneInfo(os.getenv("RELEASE_TZ", "America/New_York"))
 
 
+ALERT_AFTER = 1800
+PROCESSED_EVENT_RETENTION = 30 * DAY  # must outlive the R2 events/ lifecycle rule
+BACKFILL_HEARTBEAT = 900
+_migrated = set()
+
+
 def connect():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH, timeout=10)
     db.row_factory = sqlite3.Row
+    if DB_PATH not in _migrated:
+        migrate(db)
+        _migrated.add(DB_PATH)
+    return db
+
+
+def migrate(db):
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript("""
         CREATE TABLE IF NOT EXISTS episodes (
@@ -72,12 +85,14 @@ def connect():
         CREATE TABLE IF NOT EXISTS sync_state (
             source TEXT PRIMARY KEY, succeeded_at INTEGER, error TEXT
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY, value INTEGER
+        );
     """)
     columns = {row[1] for row in db.execute("PRAGMA table_info(processed_events)")}
     if "event_timestamp" not in columns:
         db.execute("ALTER TABLE processed_events ADD COLUMN event_timestamp INTEGER")
     db.execute("CREATE INDEX IF NOT EXISTS processed_event_time ON processed_events(event_timestamp)")
-    return db
 
 
 def secret_hash(value):
@@ -260,8 +275,19 @@ def _ingest(db, event, now=None):
 def cleanup(db, now=None):
     now = int(now if now is not None else time.time())
     with db:
+        backfill = db.execute("SELECT succeeded_at FROM sync_state WHERE source='backfill'").fetchone()
+        if backfill and backfill[0] and time.time() - backfill[0] < BACKFILL_HEARTBEAT:
+            # Historical events are always older than the retention cutoff; keep their dedupe state until done.
+            return
         db.execute("DELETE FROM sessions WHERE opened < ?", (now - 2 * DAY,))
-        db.execute("UPDATE downloads SET fingerprint=NULL, ip_hash=NULL WHERE counted_at < ?", (now - 2 * DAY,))
+        db.execute("""UPDATE downloads SET fingerprint=NULL, ip_hash=NULL WHERE counted_at < ?
+            AND (fingerprint IS NOT NULL OR ip_hash IS NOT NULL)""", (now - 2 * DAY,))
+        # Remember coverage start before pruning the live event markers it is derived from.
+        db.execute("""INSERT INTO settings(key,value) SELECT 'coverage_start', min(event_timestamp) FROM processed_events
+            WHERE true ON CONFLICT(key) DO UPDATE SET value=min(coalesce(value, excluded.value), excluded.value)
+            WHERE excluded.value IS NOT NULL""")
+        db.execute("DELETE FROM processed_events WHERE key LIKE 'events/%' AND processed_at < ?",
+                   (now - PROCESSED_EVENT_RETENTION,))
 
 
 def mark_sync(db, source, error=None):
@@ -289,7 +315,8 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
     """Read a bounded episode selection with constant query count as the archive grows."""
     now = int(now if now is not None else time.time())
     windows = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY}
-    first_event = db.execute("SELECT min(event_timestamp) FROM processed_events WHERE event_timestamp IS NOT NULL").fetchone()[0]
+    first_event = db.execute("""SELECT min(value) FROM (SELECT value FROM settings WHERE key='coverage_start'
+        UNION ALL SELECT min(event_timestamp) FROM processed_events)""").fetchone()[0]
     where, parameters = "1=1", []
     if number is not None:
         where, parameters = "number=?", [number]
@@ -424,12 +451,23 @@ def pull_r2(db, client=None):
 
 def import_events(db, path):
     """Backfill chronologically sorted Worker-format JSONL from retained logs."""
+    try:
+        mark_sync(db, "backfill")
+        return _import_events(db, path)
+    finally:
+        with db:
+            db.execute("DELETE FROM sync_state WHERE source='backfill'")
+
+
+def _import_events(db, path):
     imported = 0
     previous_time = 0
     with open(path, encoding="utf-8") as file:
         for line_number, line in enumerate(file, 1):
             if not line.strip():
                 continue
+            if line_number % 1000 == 0:
+                mark_sync(db, "backfill")
             event = json.loads(line)
             timestamp = int(event["timestamp"])
             if timestamp < previous_time:
@@ -450,17 +488,38 @@ def import_events(db, path):
 
 def save_youtube_public(db, video_id, views, observed_at):
     """Store a lifetime snapshot, never a daily increment or a download."""
+    with db:
+        _save_youtube_public(db, video_id, views, observed_at)
+
+
+def _save_youtube_public(db, video_id, views, observed_at):
     if not isinstance(views, int) or isinstance(views, bool) or views < 0:
         raise ValueError("public views must be a nonnegative integer")
+    # A future (or millisecond) timestamp would block every later snapshot, since only newer ones replace it.
+    if (not isinstance(observed_at, int) or isinstance(observed_at, bool) or observed_at <= 0
+            or observed_at > time.time() + 300):
+        raise ValueError("observed_at must be Unix seconds no later than now")
     episode = db.execute("SELECT number FROM episodes WHERE youtube_id=?", (video_id,)).fetchone()
     if episode is None:
         raise ValueError("video is not in the episode manifest")
+    db.execute("""INSERT INTO youtube_public VALUES(?,?,?,?)
+        ON CONFLICT(episode) DO UPDATE SET video_id=excluded.video_id,
+        views=excluded.views,observed_at=excluded.observed_at
+        WHERE excluded.observed_at>=youtube_public.observed_at""",
+        (episode[0], video_id, views, observed_at))
+
+
+def import_youtube_public(db, rows):
+    """Import snapshots collected elsewhere; any invalid row rejects the whole file."""
+    if not isinstance(rows, list):
+        raise ValueError("snapshot file must contain a JSON array")
     with db:
-        db.execute("""INSERT INTO youtube_public VALUES(?,?,?,?)
-            ON CONFLICT(episode) DO UPDATE SET video_id=excluded.video_id,
-            views=excluded.views,observed_at=excluded.observed_at
-            WHERE excluded.observed_at>=youtube_public.observed_at""",
-            (episode[0], video_id, views, observed_at))
+        for index, row in enumerate(rows, 1):
+            try:
+                _save_youtube_public(db, row["video_id"], row["views"], row["observed_at"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"row {index}: {error}; nothing imported") from None
+    return len(rows)
 
 
 def sync_youtube_public(db):
@@ -469,7 +528,7 @@ def sync_youtube_public(db):
     videos = db.execute("""SELECT e.youtube_id FROM episodes e LEFT JOIN youtube_public p
         ON p.episode=e.number AND p.video_id=e.youtube_id WHERE e.youtube_id IS NOT NULL
         AND (p.observed_at IS NULL OR p.observed_at<?)""", (now - DAY,)).fetchall()
-    count, failed = 0, 0
+    count, failed = 0, []
     for (video_id,) in videos:
         try:
             result = subprocess.run(["yt-dlp", "--skip-download", "--no-playlist", "--print",
@@ -480,10 +539,12 @@ def sync_youtube_public(db):
                 raise ValueError("video identity mismatch")
             save_youtube_public(db, video_id, data["view_count"], int(time.time()))
             count += 1
-        except (subprocess.SubprocessError, ValueError, KeyError, OSError):
-            failed += 1
-    if failed:
-        raise ValueError(f"Public YouTube refresh failed for {failed} videos; previous snapshots retained")
+        except (subprocess.SubprocessError, ValueError, KeyError, OSError) as error:
+            failed.append(video_id)
+            print(f"Public YouTube refresh failed for {video_id}: {error!r}", file=sys.stderr, flush=True)
+    # One private, deleted, or premiere video should not mask the health of the rest.
+    if failed and not count:
+        raise ValueError(f"Public YouTube refresh failed for all {len(failed)} videos; previous snapshots retained")
     return count
 
 
@@ -611,9 +672,37 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+def send_alert(message):
+    request = urllib.request.Request(os.environ["ALERT_WEBHOOK_URL"], data=json.dumps({"content": message}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "BitFlipAnalytics/1.0"})
+    with urllib.request.urlopen(request, timeout=10):
+        pass
+
+
+def check_alert(db, alerting, now=None, send=send_alert):
+    """Notify once when R2 polling has been failing for ALERT_AFTER seconds, and once on recovery."""
+    if not os.getenv("ALERT_WEBHOOK_URL"):
+        return alerting
+    now = now if now is not None else time.time()
+    poll = db.execute("SELECT succeeded_at,error FROM sync_state WHERE source='r2'").fetchone()
+    failing = bool(poll and poll["error"] and now - (poll["succeeded_at"] or SERVICE_STARTED) > ALERT_AFTER)
+    if failing == alerting:
+        return alerting
+    message = (f"BitFlip metrics: R2 polling has failed for over {ALERT_AFTER // 60} minutes "
+               f"(events expire from R2 after 14 days). Last error: {poll['error']}" if failing
+               else "BitFlip metrics: R2 polling recovered.")
+    try:
+        send(message)
+    except Exception as error:
+        print(f"Alert delivery failed: {error}", file=sys.stderr, flush=True)
+        return alerting
+    return failing
+
+
 def background_sync():
     last_manifest = 0
     last_youtube = 0
+    alerting = False
     while True:
         try:
             with closing(connect()) as db:
@@ -632,6 +721,7 @@ def background_sync():
                 except Exception as error:
                     mark_sync(db, "r2", error)
                     print(f"R2 poll failed: {error}", file=sys.stderr, flush=True)
+                alerting = check_alert(db, alerting)
                 if os.getenv("YOUTUBE_REFRESH_TOKEN") and time.time() - last_youtube > DAY:
                     try:
                         sync_youtube(db)
@@ -653,8 +743,7 @@ def main():
         elif command == "sync-youtube-public":
             print(f"Synced {sync_youtube_public(db)} public YouTube snapshots")
         elif command == "import-youtube-public":
-            for row in json.loads(Path(sys.argv[2]).read_text()):
-                save_youtube_public(db, row["video_id"], row["views"], row["observed_at"])
+            print(f"Imported {import_youtube_public(db, json.loads(Path(sys.argv[2]).read_text()))} public YouTube snapshots")
         elif command == "sync-youtube":
             print(f"Synced {sync_youtube(db)} YouTube daily rows")
         elif command == "pull-r2":
@@ -669,7 +758,7 @@ def main():
                     raise SystemExit(f"Set {key} before serving")
             threading.Thread(target=background_sync, daemon=True).start()
             threading.Thread(target=public_youtube_loop, daemon=True).start()
-            ThreadingHTTPServer(("0.0.0.0", 8787), Handler).serve_forever()
+            ThreadingHTTPServer((os.getenv("BIND_HOST", "0.0.0.0"), 8787), Handler).serve_forever()
         else:
             raise SystemExit(f"Unknown command: {command}")
 
