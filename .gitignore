@@ -40,3 +40,7 @@ public/favicon-source.png
 public/favicon-source-transparent.png
 public/favicon-64.png
 public/favicon.png
+
+# python bytecode
+__pycache__/
+*.pyc
