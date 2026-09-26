@@ -16,7 +16,7 @@ key_id = os.environ['INFRA_KEY_ID']
 if not key_id:
     raise SystemExit('Missing infra repository public key ID')
 
-def api(path, method='GET', payload=None):
+def api(path, method='GET', payload=None, full=False):
     request = urllib.request.Request('https://api.cloudflare.com/client/v4' + path,
         data=json.dumps(payload).encode() if payload is not None else None, method=method,
         headers={'Authorization': 'Bearer ' + auth, 'Content-Type': 'application/json'})
@@ -27,14 +27,24 @@ def api(path, method='GET', payload=None):
         raise SystemExit(f'Cloudflare {method} failed with HTTP {error.code}; no credentials printed') from None
     if not result.get('success'):
         raise SystemExit('Cloudflare operation failed; response withheld to protect credentials')
-    return result['result']
+    return result if full else result['result']
 
 prefix = f'/accounts/{account}/tokens'
+
+def list_tokens():
+    tokens, page = [], 1
+    while True:
+        response = api(f'{prefix}?page={page}&per_page=50', full=True)
+        tokens += response['result']
+        if page >= (response.get('result_info') or {}).get('total_pages', 1):
+            return tokens
+        page += 1
 groups = api(prefix + '/permission_groups')
 permission = next(x['id'] for x in groups if x['name'] == 'Workers R2 Storage Bucket Item Write')
 name = 'bitflip-metrics-events'
-if any(x.get('name') == name for x in api(prefix)):
-    raise SystemExit('Metrics token already exists. Recover the previous encrypted artifact instead of creating another token.')
+if any(x.get('name') == name for x in list_tokens()):
+    raise SystemExit('Metrics token already exists. Recover the previous encrypted artifact, or delete the '
+                     f'{name!r} account API token in Cloudflare and rerun (see analytics/README.md).')
 created = api(prefix, 'POST', {'name': name, 'policies': [{'effect': 'allow',
     'permission_groups': [{'id': permission}],
     'resources': {f'com.cloudflare.edge.r2.bucket.{account}_default_bitflip-analytics-events': '*'}}]})
