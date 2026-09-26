@@ -13,3 +13,7 @@
       directory: "/"
       schedule:
         interval: "weekly"
+    - package-ecosystem: "pip"
+      directory: "/analytics"
+      schedule:
+        interval: "weekly"

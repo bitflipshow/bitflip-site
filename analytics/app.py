@@ -488,17 +488,38 @@ def _import_events(db, path):
 
 def save_youtube_public(db, video_id, views, observed_at):
     """Store a lifetime snapshot, never a daily increment or a download."""
+    with db:
+        _save_youtube_public(db, video_id, views, observed_at)
+
+
+def _save_youtube_public(db, video_id, views, observed_at):
     if not isinstance(views, int) or isinstance(views, bool) or views < 0:
         raise ValueError("public views must be a nonnegative integer")
+    # A future (or millisecond) timestamp would block every later snapshot, since only newer ones replace it.
+    if (not isinstance(observed_at, int) or isinstance(observed_at, bool) or observed_at <= 0
+            or observed_at > time.time() + 300):
+        raise ValueError("observed_at must be Unix seconds no later than now")
     episode = db.execute("SELECT number FROM episodes WHERE youtube_id=?", (video_id,)).fetchone()
     if episode is None:
         raise ValueError("video is not in the episode manifest")
+    db.execute("""INSERT INTO youtube_public VALUES(?,?,?,?)
+        ON CONFLICT(episode) DO UPDATE SET video_id=excluded.video_id,
+        views=excluded.views,observed_at=excluded.observed_at
+        WHERE excluded.observed_at>=youtube_public.observed_at""",
+        (episode[0], video_id, views, observed_at))
+
+
+def import_youtube_public(db, rows):
+    """Import snapshots collected elsewhere; any invalid row rejects the whole file."""
+    if not isinstance(rows, list):
+        raise ValueError("snapshot file must contain a JSON array")
     with db:
-        db.execute("""INSERT INTO youtube_public VALUES(?,?,?,?)
-            ON CONFLICT(episode) DO UPDATE SET video_id=excluded.video_id,
-            views=excluded.views,observed_at=excluded.observed_at
-            WHERE excluded.observed_at>=youtube_public.observed_at""",
-            (episode[0], video_id, views, observed_at))
+        for index, row in enumerate(rows, 1):
+            try:
+                _save_youtube_public(db, row["video_id"], row["views"], row["observed_at"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"row {index}: {error}; nothing imported") from None
+    return len(rows)
 
 
 def sync_youtube_public(db):
@@ -507,7 +528,7 @@ def sync_youtube_public(db):
     videos = db.execute("""SELECT e.youtube_id FROM episodes e LEFT JOIN youtube_public p
         ON p.episode=e.number AND p.video_id=e.youtube_id WHERE e.youtube_id IS NOT NULL
         AND (p.observed_at IS NULL OR p.observed_at<?)""", (now - DAY,)).fetchall()
-    count, failed = 0, 0
+    count, failed = 0, []
     for (video_id,) in videos:
         try:
             result = subprocess.run(["yt-dlp", "--skip-download", "--no-playlist", "--print",
@@ -518,10 +539,12 @@ def sync_youtube_public(db):
                 raise ValueError("video identity mismatch")
             save_youtube_public(db, video_id, data["view_count"], int(time.time()))
             count += 1
-        except (subprocess.SubprocessError, ValueError, KeyError, OSError):
-            failed += 1
-    if failed:
-        raise ValueError(f"Public YouTube refresh failed for {failed} videos; previous snapshots retained")
+        except (subprocess.SubprocessError, ValueError, KeyError, OSError) as error:
+            failed.append(video_id)
+            print(f"Public YouTube refresh failed for {video_id}: {error!r}", file=sys.stderr, flush=True)
+    # One private, deleted, or premiere video should not mask the health of the rest.
+    if failed and not count:
+        raise ValueError(f"Public YouTube refresh failed for all {len(failed)} videos; previous snapshots retained")
     return count
 
 
@@ -720,8 +743,7 @@ def main():
         elif command == "sync-youtube-public":
             print(f"Synced {sync_youtube_public(db)} public YouTube snapshots")
         elif command == "import-youtube-public":
-            for row in json.loads(Path(sys.argv[2]).read_text()):
-                save_youtube_public(db, row["video_id"], row["views"], row["observed_at"])
+            print(f"Imported {import_youtube_public(db, json.loads(Path(sys.argv[2]).read_text()))} public YouTube snapshots")
         elif command == "sync-youtube":
             print(f"Synced {sync_youtube(db)} YouTube daily rows")
         elif command == "pull-r2":

@@ -64,9 +64,9 @@ After rollout, revoke the temporary Cloudflare bootstrap token and remove its Gi
 
 ### Public YouTube counts
 
-Run `python -m app sync-youtube-public` for an immediate refresh. The background loop checks every six hours and refreshes snapshots older than 24 hours. Failed pages retry at the next check, with existing snapshots retained and dated. If YouTube blocks the server or changes its page format, inspect `Public YouTube sync failed` and update the pinned extractor as needed. This public-page integration has no availability guarantee.
+Run `python -m app sync-youtube-public` for an immediate refresh. The background loop checks every six hours and refreshes snapshots older than 24 hours. Failed pages retry at the next check, with existing snapshots retained and dated. Each failing video is logged; the sync is only marked failed when every due video fails, so one private or deleted video does not hide the health of the rest. If YouTube blocks the server or changes its page format, inspect `Public YouTube sync failed` and update the pinned extractor as needed (Dependabot opens weekly pip update PRs for `analytics/requirements.txt`). This public-page integration has no availability guarantee.
 
-For a snapshot collected elsewhere, `python -m app import-youtube-public /data/snapshots.json` accepts a JSON array of `video_id`, integer `views`, and Unix `observed_at`. Only videos in the manifest are accepted; older snapshots cannot overwrite newer ones. Public totals are never added to daily Analytics reports or audio downloads. Spotify has no public counts in this integration; its columns remain unavailable without a creator export.
+For a snapshot collected elsewhere, `python -m app import-youtube-public /data/snapshots.json` accepts a JSON array of `video_id`, integer `views`, and Unix `observed_at` in seconds, no later than now. Any invalid row rejects the whole file. Only videos in the manifest are accepted; older snapshots cannot overwrite newer ones. Public totals are never added to daily Analytics reports or audio downloads. Spotify has no public counts in this integration; its columns remain unavailable without a creator export.
 
 ### Dashboard layout
 
