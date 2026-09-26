@@ -62,3 +62,47 @@ test("early disconnect records only streamed bytes", async () => {
   assert.equal(events[0].start, 0);
   assert.equal(events[0].end, 19);
 });
+
+test("encoded filenames are decoded and malformed escapes are rejected", async () => {
+  const requested = [];
+  const events = [];
+  const object = { size: 10, httpEtag: '"etag"',
+    body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(10)); controller.close(); } }),
+    writeHttpMetadata() {} };
+  const env = { AUDIO_BUCKET: { async get(name) { requested.push(name); return object; } },
+    ANALYTICS_EVENTS: { async put(_key, body) { events.push(JSON.parse(body)); } } };
+  const waits = [];
+  const ctx = { waitUntil(promise) { waits.push(promise); } };
+  const response = await worker.fetch(new Request("https://audio.bitflip.show/my%20episode.mp3"), env, ctx);
+  await response.arrayBuffer();
+  await Promise.all(waits);
+  assert.deepEqual(requested, ["my episode.mp3"]);
+  assert.equal(events[0].filename, "my episode.mp3");
+  for (const path of ["/bad%E0.mp3", "/nested%2Fepisode.mp3"]) {
+    const rejected = await worker.fetch(new Request("https://audio.bitflip.show" + path), env, ctx);
+    assert.equal(rejected.status, 404);
+  }
+  assert.equal(requested.length, 1);
+});
+
+test("cancelled download is recorded even if the source cancel fails", async () => {
+  const events = [];
+  const object = { size: 100, httpEtag: '"etag"',
+    body: new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(20)); },
+      cancel() { throw new Error("source cancel failed"); },
+    }),
+    writeHttpMetadata() {} };
+  const env = { AUDIO_BUCKET: { async get() { return object; } },
+    ANALYTICS_EVENTS: { async put(_key, body) { events.push(JSON.parse(body)); } } };
+  const waits = [];
+  const response = await worker.fetch(new Request("https://audio.bitflip.show/episode.mp3", {
+    headers: { "CF-Connecting-IP": "8.8.8.8", "User-Agent": "PodcastApp/1" },
+  }), env, { waitUntil(promise) { waits.push(promise); } });
+  const reader = response.body.getReader();
+  await reader.read();
+  await reader.cancel("client left").catch(() => {});
+  await Promise.all(waits);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].end, 19);
+});

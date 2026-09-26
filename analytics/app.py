@@ -17,15 +17,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from views import dashboard
 
 
 DB_PATH = os.getenv("DB_PATH", "/data/analytics.sqlite3")
-BOT = re.compile(r"bot|spider|crawler|preview|facebookexternalhit|google|bing|curl/|wget/|python-requests|headless|monitor|atc/.*watchos|\(null\)/\(null\).*watchos", re.I)
+BOT = re.compile(r"bitflipanalytics|bot|spider|crawler|preview|facebookexternalhit|google|bing|curl/|wget/|python-requests|headless|monitor|atc/.*watchos|\(null\)/\(null\).*watchos", re.I)
 DAY = 86400
 SERVICE_STARTED = time.time()
+RELEASE_TZ = ZoneInfo(os.getenv("RELEASE_TZ", "America/New_York"))
 
 
 def connect():
@@ -114,9 +116,13 @@ def youtube_id(url):
     return None
 
 
+def is_mp3(url):
+    return urllib.parse.urlparse(url).path.lower().endswith(".mp3")
+
+
 def header_size(url):
     """Measure MP3 ID3v2 header using a ten-byte range read."""
-    if not url.lower().split("?")[0].endswith(".mp3"):
+    if not is_mp3(url):
         return 0
     request = urllib.request.Request(url, headers={"Range": "bytes=0-9", "User-Agent": "BitFlipAnalyticsManifest/1.0"})
     with urllib.request.urlopen(request, timeout=10) as response:
@@ -154,9 +160,14 @@ def sync_manifest(db, source=None):
                 print(f"Audio size mismatch for episode {episode['number']}: feed={declared_size}, live={size}",
                       file=sys.stderr, flush=True)
             header = header_size(url)
-            minute = min(size - header, (size - header) * 60 // seconds) if seconds > 0 and url.lower().endswith(".mp3") else None
-        except (ValueError, urllib.error.URLError, TimeoutError):
-            size, header, minute = declared_size, None, None
+            minute = min(size - header, (size - header) * 60 // seconds) if seconds > 0 and is_mp3(url) else None
+        except (ValueError, urllib.error.URLError, TimeoutError) as error:
+            # Keep the last measured values; the feed size may be stale and would reject every event.
+            known = db.execute("SELECT size,header_bytes,minute_bytes FROM episodes WHERE number=? AND audio_url=?",
+                               (int(episode["number"]), url)).fetchone()
+            size, header, minute = tuple(known) if known else (declared_size, None, None)
+            print(f"Audio probe failed for episode {episode['number']}: {error}; "
+                  f"{'keeping last measured size' if known else 'using feed size'}", file=sys.stderr, flush=True)
         db.execute("""INSERT INTO episodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(number) DO UPDATE SET title=excluded.title, published=excluded.published,
             filename=excluded.filename, audio_url=excluded.audio_url, size=excluded.size,
@@ -219,7 +230,9 @@ def _ingest(db, event, now=None):
         start, end = int(event["start"]), int(event["end"])
     except (KeyError, TypeError, ValueError):
         return "invalid"
-    if size != episode["size"] or start < 0 or end < start or end >= size or (start == 0 and end == 1):
+    if size != episode["size"]:
+        return "size_mismatch"
+    if start < 0 or end < start or end >= size or (start == 0 and end == 1):
         return "invalid"
     if event["status"] == 200 and start != 0:
         return "invalid"
@@ -262,6 +275,16 @@ def mark_sync(db, source, error=None):
                 ON CONFLICT(source) DO UPDATE SET error=excluded.error""", (source, str(error)[:500]))
 
 
+def release_floor(published):
+    """Earliest time a release window may start; date-only values mean the release day in RELEASE_TZ."""
+    if len(published) == 10:
+        return int(datetime.fromisoformat(published).replace(tzinfo=RELEASE_TZ).timestamp())
+    moment = datetime.fromisoformat(published.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(moment.timestamp())
+
+
 def summary(db, now=None, limit=None, offset=0, query="", number=None):
     """Read a bounded episode selection with constant query count as the archive grows."""
     now = int(now if now is not None else time.time())
@@ -280,15 +303,25 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
         ORDER BY julianday(published) DESC,number DESC LIMIT ? OFFSET ?""",
         [*parameters, limit if limit is not None else -1, offset]).fetchall()
     ids = [row["number"] for row in rows]
+    # Episodes released after collection began start their windows at the first counted download
+    # on or after release day; older episodes fall back to release day with partial-history labels.
+    floors = {row["number"]: release_floor(row["published"]) for row in rows}
+    covered = {number: first_event is not None and first_event <= floor for number, floor in floors.items()}
     counts_by_episode, external_by_episode = {}, {}
     if ids:
         placeholders = ",".join("?" for _ in ids)
-        for row in db.execute(f"""SELECT d.episode, count(*) AS lifetime,
-            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+86400) AS '24h',
-            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+604800) AS '7d',
-            sum(d.counted_at>=unixepoch(e.published) AND d.counted_at<unixepoch(e.published)+2592000) AS '30d'
-            FROM downloads d JOIN episodes e ON e.number=d.episode
-            WHERE d.episode IN ({placeholders}) AND d.counted_at<=? GROUP BY d.episode""", [*ids, now]):
+        values = ",".join("(?,?,?)" for _ in ids)
+        for row in db.execute(f"""WITH floors(episode,floor,covered) AS (VALUES {values}),
+            starts AS (SELECT episode, CASE WHEN covered THEN (SELECT min(counted_at) FROM downloads d
+                WHERE d.episode=f.episode AND d.counted_at>=f.floor AND d.counted_at<=?) ELSE floor END AS start
+                FROM floors f)
+            SELECT d.episode, s.start, count(*) AS lifetime,
+            coalesce(sum(d.counted_at>=s.start AND d.counted_at<s.start+86400), 0) AS '24h',
+            coalesce(sum(d.counted_at>=s.start AND d.counted_at<s.start+604800), 0) AS '7d',
+            coalesce(sum(d.counted_at>=s.start AND d.counted_at<s.start+2592000), 0) AS '30d'
+            FROM downloads d JOIN starts s ON s.episode=d.episode
+            WHERE d.counted_at<=? GROUP BY d.episode, s.start""",
+            [*(v for n in ids for v in (n, floors[n], covered[n])), now, now]):
             counts_by_episode[row["episode"]] = dict(row)
         for episode, platform, metric, value in db.execute(f"""SELECT episode,platform,metric,sum(value)
             FROM platform_daily WHERE episode IN ({placeholders}) AND day<=date(?,'unixepoch')
@@ -296,22 +329,22 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
             external_by_episode.setdefault(episode, {})[f"{platform}_{metric}"] = value
     episodes = []
     for row in rows:
-        published = datetime.fromisoformat(row["published"].replace("Z", "+00:00"))
-        if published.tzinfo is None:
-            published = published.replace(tzinfo=timezone.utc)
-        start = int(published.timestamp())
-        counts = counts_by_episode.get(row["number"], dict.fromkeys([*windows, "lifetime"], 0))
+        floor = floors[row["number"]]
+        counts = counts_by_episode.get(row["number"], dict.fromkeys([*windows, "lifetime", "start"], 0))
+        start = (counts["start"] or None) if covered[row["number"]] else floor
         states = {}
         for name, seconds in windows.items():
-            end = start + seconds
-            if first_event is None or first_event >= end or now < start:
+            if first_event is None or now < floor:
                 states[name] = "unavailable"
-            elif first_event > start:
-                states[name] = "partial history"
+            elif covered[row["number"]]:
+                states[name] = "complete" if start is not None and now >= start + seconds else "collecting"
+            elif first_event >= floor + seconds:
+                states[name] = "unavailable"
             else:
-                states[name] = "complete" if now >= end else "collecting"
+                states[name] = "partial history"
         episodes.append({**dict(row), **{key: counts[key] for key in [*windows, "lifetime"]},
-                         **external_by_episode.get(row["number"], {}), "window_status": states})
+                         **external_by_episode.get(row["number"], {}), "window_start": start,
+                         "window_status": states})
     return {"episodes": episodes, "coverage_start": first_event, "total": total, "offset": offset,
             "page_size": limit, "query": query}
 
@@ -331,6 +364,10 @@ def import_spotify(db, path, metric, date_column, value_column, episode_column=N
     return count
 
 
+# Leave these in R2 so a later manifest sync can resolve them before the lifecycle rule expires them.
+RETRYABLE = ("unknown_episode", "size_mismatch")
+
+
 def process_event(db, key, event):
     """Commit the event marker and its counting effects in one transaction."""
     timestamp = int(event["timestamp"])
@@ -339,7 +376,7 @@ def process_event(db, key, event):
         if db.execute("SELECT 1 FROM processed_events WHERE key=?", (key,)).fetchone():
             return "already_processed"
         result = _ingest(db, event, timestamp)
-        if result == "unknown_episode":
+        if result in RETRYABLE:
             return result
         db.execute("INSERT INTO processed_events(key,processed_at,event_timestamp) VALUES(?,?,?)",
                    (key, int(time.time()), timestamp))
@@ -355,6 +392,7 @@ def pull_r2(db, client=None):
             aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"], region_name="auto")
     bucket = os.environ.get("R2_EVENTS_BUCKET", "bitflip-analytics-events")
     imported = 0
+    waiting = dict.fromkeys(RETRYABLE, 0)
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix="events/"):
         for item in page.get("Contents", []):
             key = item["Key"]
@@ -362,12 +400,25 @@ def pull_r2(db, client=None):
                 client.delete_object(Bucket=bucket, Key=key)
                 continue
             body = client.get_object(Bucket=bucket, Key=key)["Body"].read()
-            event = json.loads(body)
-            result = process_event(db, key, event)
-            if result == "unknown_episode":
+            try:
+                event = json.loads(body)
+                if not isinstance(event, dict):
+                    raise ValueError("event is not an object")
+                result = process_event(db, key, event)
+            except (ValueError, KeyError, TypeError) as error:
+                # Move malformed events aside so they cannot block later events until they expire.
+                client.copy_object(Bucket=bucket, Key="rejected/" + key.removeprefix("events/"),
+                                   CopySource={"Bucket": bucket, "Key": key})
+                client.delete_object(Bucket=bucket, Key=key)
+                print(f"Rejected malformed R2 event {key}: {error!r}", file=sys.stderr, flush=True)
+                continue
+            if result in RETRYABLE:
+                waiting[result] += 1
                 continue
             client.delete_object(Bucket=bucket, Key=key)
             imported += 1
+    if any(waiting.values()):
+        print(f"R2 events awaiting manifest update: {waiting}", file=sys.stderr, flush=True)
     return imported
 
 
@@ -391,6 +442,8 @@ def import_events(db, path):
             result = process_event(db, key, event)
             if result == "unknown_episode":
                 raise ValueError(f"line {line_number}: episode filename missing from manifest")
+            if result == "size_mismatch":
+                raise ValueError(f"line {line_number}: file size differs from the manifest")
             imported += 1
     return imported
 
