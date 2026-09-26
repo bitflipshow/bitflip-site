@@ -45,6 +45,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_head_bot_and_probe_do_not_count(self):
         self.assertEqual(app.ingest(self.db, self.event(method="HEAD"), self.now), "ignored")
         self.assertEqual(app.ingest(self.db, self.event(ua="Googlebot/2.1"), self.now), "filtered")
+        self.assertEqual(app.ingest(self.db, self.event(ua="BitFlipAnalyticsManifest/1.0"), self.now), "filtered")
         self.assertEqual(app.ingest(self.db, self.event(0, 1, 206), self.now), "invalid")
         self.assertEqual(app.summary(self.db, self.now)["episodes"][0]["lifetime"], 0)
 
@@ -65,7 +66,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_invalid_size_unknown_episode_and_separate_listener(self):
         bad = self.event()
         bad["size"] = 1
-        self.assertEqual(app.ingest(self.db, bad, self.now), "invalid")
+        self.assertEqual(app.ingest(self.db, bad, self.now), "size_mismatch")
         bad = self.event()
         bad["filename"] = "other.mp3"
         self.assertEqual(app.ingest(self.db, bad, self.now), "unknown_episode")
@@ -110,6 +111,55 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(app.pull_r2(self.db, client), 0)
         self.assertEqual(self.db.execute("SELECT count(*) FROM downloads").fetchone()[0], 1)
         self.assertEqual(len(client.deleted), 2)
+
+    def r2_client(self, objects):
+        class Client:
+            def __init__(self):
+                self.objects, self.deleted, self.copied = dict(objects), [], []
+            def get_paginator(self, _name):
+                return self
+            def paginate(self, **_kwargs):
+                return [{"Contents": [{"Key": key} for key in sorted(self.objects)]}]
+            def get_object(self, Key, **_kwargs):
+                return {"Body": io.BytesIO(self.objects[Key])}
+            def copy_object(self, Key, CopySource, **_kwargs):
+                self.copied.append((CopySource["Key"], Key))
+            def delete_object(self, Key, **_kwargs):
+                self.deleted.append(Key)
+                del self.objects[Key]
+        return Client()
+
+    def test_malformed_r2_event_is_set_aside_without_blocking_later_events(self):
+        good = json.dumps({**self.event(), "timestamp": self.now}).encode()
+        client = self.r2_client({"events/a.json": b"{not json", "events/b.json": b"[]",
+                                 "events/c.json": b'{"method":"GET"}', "events/d.json": good})
+        self.assertEqual(app.pull_r2(self.db, client), 1)
+        self.assertEqual(client.copied, [("events/a.json", "rejected/a.json"), ("events/b.json", "rejected/b.json"),
+                                         ("events/c.json", "rejected/c.json")])
+        self.assertEqual(client.objects, {})
+        self.assertEqual(self.db.execute("SELECT count(*) FROM downloads").fetchone()[0], 1)
+
+    def test_size_mismatch_waits_in_r2_until_manifest_matches(self):
+        event = {**self.event(), "size": 2100000, "end": 2099999, "timestamp": self.now}
+        client = self.r2_client({"events/a.json": json.dumps(event).encode()})
+        self.assertEqual(app.pull_r2(self.db, client), 0)
+        self.assertIn("events/a.json", client.objects)
+        self.assertIsNone(self.db.execute("SELECT 1 FROM processed_events").fetchone())
+        self.db.execute("UPDATE episodes SET size=2100000")
+        self.db.commit()
+        self.assertEqual(app.pull_r2(self.db, client), 1)
+        self.assertEqual(client.objects, {})
+
+    def test_failed_audio_probe_keeps_last_measured_values(self):
+        manifest = [{"number": 15, "title": "Episode 15", "published": "2023-11-14T22:13:20Z",
+                     "audioUrl": "https://audio.example/episode.mp3", "audioSize": 52,
+                     "duration": "2:00", "youtubeUrl": "https://youtu.be/video15"}]
+        with patch.object(app.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(manifest).encode())), \
+             patch.object(app, "live_size", side_effect=app.urllib.error.URLError("down")):
+            app.sync_manifest(self.db, "https://bitflip.show/analytics-manifest.json")
+        row = self.db.execute("SELECT size,header_bytes,minute_bytes FROM episodes").fetchone()
+        self.assertEqual(tuple(row), (2000000, 10000, 995000))
+        self.assertEqual(app.ingest(self.db, self.event(), self.now), "counted")
 
     def test_manifest_identifies_collector_and_preserves_publication_time(self):
         manifest = [{"number": 15, "title": "Episode 15", "published": "2023-11-14T22:13:20Z",
@@ -171,6 +221,30 @@ class AnalyticsTests(unittest.TestCase):
         episode = app.summary(self.db, self.now + 60 * app.DAY)["episodes"][0]
         self.assertEqual([episode[x] for x in ("24h", "7d", "30d", "lifetime")], [1, 2, 3, 4])
         self.assertEqual(episode["window_status"]["30d"], "complete")
+
+    def test_date_only_release_windows_start_at_first_download(self):
+        self.db.execute("UPDATE episodes SET published='2023-11-15'")
+        self.db.commit()
+        release_day = 1_700_024_400  # 2023-11-15 00:00 America/New_York
+        self.assertEqual(app.release_floor("2023-11-15"), release_day)
+        first = release_day + 10 * 3600
+        for index, timestamp in enumerate((self.now, first, first + 20 * 3600, first + 30 * 3600)):
+            app.process_event(self.db, f"events/{index}",
+                              {**self.event(ip=f"198.51.100.{index + 1}"), "timestamp": timestamp})
+        episode = app.summary(self.db, first + 3 * app.DAY)["episodes"][0]
+        self.assertEqual(episode["window_start"], first)
+        self.assertEqual([episode[x] for x in ("24h", "7d", "30d", "lifetime")], [2, 3, 3, 4])
+        self.assertEqual(episode["window_status"], {"24h": "complete", "7d": "collecting", "30d": "collecting"})
+
+    def test_release_without_downloads_is_collecting(self):
+        self.db.execute("UPDATE episodes SET published='2023-11-15'")
+        self.db.commit()
+        app.process_event(self.db, "events/other", {**self.event(), "filename": "other.mp3", "timestamp": self.now})
+        app.process_event(self.db, "events/probe", {**self.event(0, 1, 206), "timestamp": self.now})
+        episode = app.summary(self.db, self.now + 2 * app.DAY)["episodes"][0]
+        self.assertIsNone(episode["window_start"])
+        self.assertEqual(episode["24h"], 0)
+        self.assertEqual(set(episode["window_status"].values()), {"collecting"})
 
     def test_late_collection_does_not_claim_missing_history_is_zero(self):
         app.process_event(self.db, "events/late", {**self.event(), "timestamp": self.now + 2 * app.DAY})

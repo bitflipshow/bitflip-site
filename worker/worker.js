@@ -25,7 +25,12 @@ export default {
       return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
 
-    const filename = new URL(request.url).pathname.slice(1);
+    let filename;
+    try {
+      filename = decodeURIComponent(new URL(request.url).pathname.slice(1));
+    } catch {
+      return new Response("Not Found", { status: 404 });
+    }
     if (!filename || filename.includes("/") || !/\.(mp3|wav|m4a)$/i.test(filename)) {
       return new Response("Not Found", { status: 404 });
     }
@@ -122,8 +127,11 @@ export default {
           }
         },
         async cancel(reason) {
-          await reader.cancel(reason);
-          finish();
+          try {
+            await reader.cancel(reason);
+          } finally {
+            finish();
+          }
         },
       });
     }
