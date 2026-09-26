@@ -3,6 +3,7 @@ import tempfile
 import json
 import io
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
@@ -23,6 +24,8 @@ class AnalyticsTests(unittest.TestCase):
         self.db.execute("DELETE FROM sessions")
         self.db.execute("DELETE FROM downloads")
         self.db.execute("DELETE FROM episodes")
+        self.db.execute("DELETE FROM settings")
+        self.db.execute("DELETE FROM sync_state")
         self.db.execute("""INSERT INTO episodes VALUES
             (15,'Episode 15','2023-11-14T22:13:20+00:00','episode.mp3','https://audio.example/episode.mp3',
              2000000,120,10000,995000,'video15')""")
@@ -344,6 +347,59 @@ class AnalyticsTests(unittest.TestCase):
         row = self.db.execute("SELECT fingerprint,ip_hash FROM downloads").fetchone()
         self.assertEqual(tuple(row), (None, None))
         self.assertEqual(self.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+
+    def test_cleanup_skips_cleared_rows_and_prunes_live_markers(self):
+        app.process_event(self.db, "events/one", {**self.event(), "timestamp": self.now})
+        app.process_event(self.db, "history/old", {**self.event(ip="198.51.100.2"), "timestamp": self.now - 5})
+        self.db.execute("UPDATE processed_events SET processed_at=?", (self.now,))
+        self.db.commit()
+        app.cleanup(self.db, self.now + 3 * app.DAY)
+        before = self.db.total_changes
+        app.cleanup(self.db, self.now + 3 * app.DAY + 300)
+        self.assertEqual(self.db.total_changes - before, 1)  # only the coverage_start upsert
+        app.cleanup(self.db, self.now + 31 * app.DAY)
+        keys = [row[0] for row in self.db.execute("SELECT key FROM processed_events")]
+        self.assertEqual(keys, ["history/old"])
+        self.db.execute("DELETE FROM processed_events")
+        self.db.commit()
+        self.assertEqual(app.summary(self.db, self.now + 31 * app.DAY)["coverage_start"], self.now - 5)
+
+    def test_backfill_pauses_cleanup(self):
+        path = Path(tempfile.mktemp(suffix=".jsonl"))
+        events = [{**self.event(0, 600000, 206), "timestamp": self.now},
+                  {**self.event(600001, 1010000, 206), "timestamp": self.now + 60}]
+        path.write_text("".join(json.dumps(e) + "\n" for e in events))
+        original = app._ingest
+        def ingest_then_cleanup(db, event, now=None):
+            result = original(db, event, now)
+            app.cleanup(self.db)  # the live service cleaning up mid-import
+            return result
+        try:
+            with patch.object(app, "_ingest", side_effect=ingest_then_cleanup):
+                self.assertEqual(app.import_events(self.db, path), 2)
+        finally:
+            path.unlink()
+        self.assertEqual(self.db.execute("SELECT count(*) FROM downloads").fetchone()[0], 1)
+        self.assertIsNone(self.db.execute("SELECT 1 FROM sync_state WHERE source='backfill'").fetchone())
+
+    def test_alert_once_when_polling_fails_and_once_on_recovery(self):
+        sent = []
+        with patch.dict(os.environ, {"ALERT_WEBHOOK_URL": "https://hooks.example/test"}):
+            app.mark_sync(self.db, "r2")
+            self.assertFalse(app.check_alert(self.db, False, time.time(), sent.append))
+            app.mark_sync(self.db, "r2", "R2 unavailable")
+            self.assertFalse(app.check_alert(self.db, False, time.time() + 60, sent.append))
+            self.assertTrue(app.check_alert(self.db, False, time.time() + app.ALERT_AFTER + 60, sent.append))
+            self.assertTrue(app.check_alert(self.db, True, time.time() + app.ALERT_AFTER + 360, sent.append))
+            def broken(_message):
+                raise OSError("webhook down")
+            app.mark_sync(self.db, "r2")
+            self.assertTrue(app.check_alert(self.db, True, time.time(), broken))
+            self.assertFalse(app.check_alert(self.db, True, time.time(), sent.append))
+        self.assertEqual(len(sent), 2)
+        self.assertIn("R2 unavailable", sent[0])
+        self.assertIn("recovered", sent[1])
+        self.assertFalse(app.check_alert(self.db, False, time.time() + app.ALERT_AFTER * 10, sent.append))
 
 
 if __name__ == "__main__":

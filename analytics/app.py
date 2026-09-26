@@ -30,10 +30,23 @@ SERVICE_STARTED = time.time()
 RELEASE_TZ = ZoneInfo(os.getenv("RELEASE_TZ", "America/New_York"))
 
 
+ALERT_AFTER = 1800
+PROCESSED_EVENT_RETENTION = 30 * DAY  # must outlive the R2 events/ lifecycle rule
+BACKFILL_HEARTBEAT = 900
+_migrated = set()
+
+
 def connect():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH, timeout=10)
     db.row_factory = sqlite3.Row
+    if DB_PATH not in _migrated:
+        migrate(db)
+        _migrated.add(DB_PATH)
+    return db
+
+
+def migrate(db):
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript("""
         CREATE TABLE IF NOT EXISTS episodes (
@@ -72,12 +85,14 @@ def connect():
         CREATE TABLE IF NOT EXISTS sync_state (
             source TEXT PRIMARY KEY, succeeded_at INTEGER, error TEXT
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY, value INTEGER
+        );
     """)
     columns = {row[1] for row in db.execute("PRAGMA table_info(processed_events)")}
     if "event_timestamp" not in columns:
         db.execute("ALTER TABLE processed_events ADD COLUMN event_timestamp INTEGER")
     db.execute("CREATE INDEX IF NOT EXISTS processed_event_time ON processed_events(event_timestamp)")
-    return db
 
 
 def secret_hash(value):
@@ -260,8 +275,19 @@ def _ingest(db, event, now=None):
 def cleanup(db, now=None):
     now = int(now if now is not None else time.time())
     with db:
+        backfill = db.execute("SELECT succeeded_at FROM sync_state WHERE source='backfill'").fetchone()
+        if backfill and backfill[0] and time.time() - backfill[0] < BACKFILL_HEARTBEAT:
+            # Historical events are always older than the retention cutoff; keep their dedupe state until done.
+            return
         db.execute("DELETE FROM sessions WHERE opened < ?", (now - 2 * DAY,))
-        db.execute("UPDATE downloads SET fingerprint=NULL, ip_hash=NULL WHERE counted_at < ?", (now - 2 * DAY,))
+        db.execute("""UPDATE downloads SET fingerprint=NULL, ip_hash=NULL WHERE counted_at < ?
+            AND (fingerprint IS NOT NULL OR ip_hash IS NOT NULL)""", (now - 2 * DAY,))
+        # Remember coverage start before pruning the live event markers it is derived from.
+        db.execute("""INSERT INTO settings(key,value) SELECT 'coverage_start', min(event_timestamp) FROM processed_events
+            WHERE true ON CONFLICT(key) DO UPDATE SET value=min(coalesce(value, excluded.value), excluded.value)
+            WHERE excluded.value IS NOT NULL""")
+        db.execute("DELETE FROM processed_events WHERE key LIKE 'events/%' AND processed_at < ?",
+                   (now - PROCESSED_EVENT_RETENTION,))
 
 
 def mark_sync(db, source, error=None):
@@ -289,7 +315,8 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
     """Read a bounded episode selection with constant query count as the archive grows."""
     now = int(now if now is not None else time.time())
     windows = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY}
-    first_event = db.execute("SELECT min(event_timestamp) FROM processed_events WHERE event_timestamp IS NOT NULL").fetchone()[0]
+    first_event = db.execute("""SELECT min(value) FROM (SELECT value FROM settings WHERE key='coverage_start'
+        UNION ALL SELECT min(event_timestamp) FROM processed_events)""").fetchone()[0]
     where, parameters = "1=1", []
     if number is not None:
         where, parameters = "number=?", [number]
@@ -424,12 +451,23 @@ def pull_r2(db, client=None):
 
 def import_events(db, path):
     """Backfill chronologically sorted Worker-format JSONL from retained logs."""
+    try:
+        mark_sync(db, "backfill")
+        return _import_events(db, path)
+    finally:
+        with db:
+            db.execute("DELETE FROM sync_state WHERE source='backfill'")
+
+
+def _import_events(db, path):
     imported = 0
     previous_time = 0
     with open(path, encoding="utf-8") as file:
         for line_number, line in enumerate(file, 1):
             if not line.strip():
                 continue
+            if line_number % 1000 == 0:
+                mark_sync(db, "backfill")
             event = json.loads(line)
             timestamp = int(event["timestamp"])
             if timestamp < previous_time:
@@ -611,9 +649,37 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+def send_alert(message):
+    request = urllib.request.Request(os.environ["ALERT_WEBHOOK_URL"], data=json.dumps({"content": message}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "BitFlipAnalytics/1.0"})
+    with urllib.request.urlopen(request, timeout=10):
+        pass
+
+
+def check_alert(db, alerting, now=None, send=send_alert):
+    """Notify once when R2 polling has been failing for ALERT_AFTER seconds, and once on recovery."""
+    if not os.getenv("ALERT_WEBHOOK_URL"):
+        return alerting
+    now = now if now is not None else time.time()
+    poll = db.execute("SELECT succeeded_at,error FROM sync_state WHERE source='r2'").fetchone()
+    failing = bool(poll and poll["error"] and now - (poll["succeeded_at"] or SERVICE_STARTED) > ALERT_AFTER)
+    if failing == alerting:
+        return alerting
+    message = (f"BitFlip metrics: R2 polling has failed for over {ALERT_AFTER // 60} minutes "
+               f"(events expire from R2 after 14 days). Last error: {poll['error']}" if failing
+               else "BitFlip metrics: R2 polling recovered.")
+    try:
+        send(message)
+    except Exception as error:
+        print(f"Alert delivery failed: {error}", file=sys.stderr, flush=True)
+        return alerting
+    return failing
+
+
 def background_sync():
     last_manifest = 0
     last_youtube = 0
+    alerting = False
     while True:
         try:
             with closing(connect()) as db:
@@ -632,6 +698,7 @@ def background_sync():
                 except Exception as error:
                     mark_sync(db, "r2", error)
                     print(f"R2 poll failed: {error}", file=sys.stderr, flush=True)
+                alerting = check_alert(db, alerting)
                 if os.getenv("YOUTUBE_REFRESH_TOKEN") and time.time() - last_youtube > DAY:
                     try:
                         sync_youtube(db)
@@ -669,7 +736,7 @@ def main():
                     raise SystemExit(f"Set {key} before serving")
             threading.Thread(target=background_sync, daemon=True).start()
             threading.Thread(target=public_youtube_loop, daemon=True).start()
-            ThreadingHTTPServer(("0.0.0.0", 8787), Handler).serve_forever()
+            ThreadingHTTPServer((os.getenv("BIND_HOST", "0.0.0.0"), 8787), Handler).serve_forever()
         else:
             raise SystemExit(f"Unknown command: {command}")
 

@@ -53,9 +53,8 @@ jobs:
           if ! wrangler r2 bucket info bitflip-analytics-events >/dev/null 2>&1; then
             wrangler r2 bucket create bitflip-analytics-events
           fi
-          if ! wrangler r2 bucket lifecycle list bitflip-analytics-events | grep -Fq expire-raw-events; then
-            wrangler r2 bucket lifecycle add bitflip-analytics-events expire-raw-events events/ --expire-days 2
-          fi
+          # Replaces all rules: raw events expire after 14 days, rejected events after 30.
+          wrangler r2 bucket lifecycle set bitflip-analytics-events --file analytics-lifecycle.json --force
 
       - name: Verify event bucket privacy
         working-directory: worker
@@ -64,7 +63,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           wrangler r2 bucket dev-url disable bitflip-analytics-events --force
-          wrangler r2 bucket domain list bitflip-analytics-events
+          domains=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/bitflip-analytics-events/domains/custom" \
+            | jq -r '.result.domains[]?.domain')
+          if [ -n "$domains" ]; then
+            echo "::error::Event bucket has public custom domains: $domains"
+            exit 1
+          fi
 
       - name: Install credential sealing dependency
         if: inputs.bootstrap_credentials
