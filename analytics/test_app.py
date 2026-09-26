@@ -310,6 +310,8 @@ class AnalyticsTests(unittest.TestCase):
         old = app.summary(self.db, number=15, limit=1)["episodes"][0]
         self.assertEqual(old["lifetime"], 1)
         self.assertEqual(app.summary(self.db, query="#15", limit=25)["total"], 1)
+        for query in ("#05", "05"):
+            self.assertEqual([e["number"] for e in app.summary(self.db, query=query, limit=25)["episodes"]], [5])
 
     def test_http_recent_archive_detail_and_invalid_navigation(self):
         self.populate_archive()
@@ -330,6 +332,10 @@ class AnalyticsTests(unittest.TestCase):
             self.assertIn('data-episode="0"', fetch("/episodes?q=%230"))
             self.assertIn('No episodes found', fetch("/episodes?q=%3Cscript%3E"))
             self.assertIn('value="&lt;script&gt;"', fetch("/episodes?q=%3Cscript%3E"))
+            self.assertEqual(home.count('data-episode="'), fetch("/?page=x").count('data-episode="'))
+            self.assertEqual(len(json.loads(fetch("/api/summary?page=x"))["episodes"]), 10)
+            with app.urllib.request.urlopen(base + "/podcast-logo.png?v=2") as response:
+                self.assertEqual(response.headers["Content-Type"], "image/png")
             for path, code in (("/episodes?page=-1", 400), ("/episodes?page=no", 400),
                                ("/episodes?page=100", 404), ("/episodes/999", 404)):
                 with self.assertRaises(app.urllib.error.HTTPError) as failure:
