@@ -93,13 +93,13 @@ def dashboard(data, mode='recent', metric='lifetime'):
     def aggregate(values):
         return sum(v for v in values if v is not None) if any(v is not None for v in values) else None
     scope_note = 'This episode' if detail else f'{len(episodes)} episodes shown'
-    cards = ''.join(f'<div class="stat"><span class="stat-label">{label}</span><strong class="{color}">{value_text(value)}</strong><span class="stat-note">{note}</span></div>' for label,value,color,note in [
-        ('Audio downloads', aggregate(audio_values), 'audio-text', 'Recorded lifetime · ' + scope_note.lower()),
-        ('YouTube views', aggregate(public_values), 'youtube-text', f'Public lifetime · {sum(v is not None for v in public_values)}/{len(episodes)} available'),
-        ('Spotify plays', aggregate(spotify_values), '', 'Creator export needed' if aggregate(spotify_values) is None else 'Imported dates · ' + scope_note.lower()),
-        ('Release windows' if detail else 'Episodes in view', None if detail else len(episodes), '', 'Measured since release' if detail else f'{total} matching episodes' if query else f'{total} episodes in catalogue')])
-    if detail:
-        cards = cards.replace('<span class="stat-label">Release windows</span><strong class=""><span class="unavailable" title="Data unavailable">—</span></strong>', '<span class="stat-label">Release windows</span><strong class="windows-label">24h / 7d / 30d</strong>')
+    last_card = (('Release windows', '24h / 7d / 30d', 'windows-label', 'Measured since release') if detail else
+                 ('Episodes in view', value_text(len(episodes)), '', f'{total} matching episodes' if query else f'{total} episodes in catalogue'))
+    cards = ''.join(f'<div class="stat"><span class="stat-label">{label}</span><strong class="{color}">{value_html}</strong><span class="stat-note">{note}</span></div>' for label,value_html,color,note in [
+        ('Audio downloads', value_text(aggregate(audio_values)), 'audio-text', 'Recorded lifetime · ' + scope_note.lower()),
+        ('YouTube views', value_text(aggregate(public_values)), 'youtube-text', f'Public lifetime · {sum(v is not None for v in public_values)}/{len(episodes)} available'),
+        ('Spotify plays', value_text(aggregate(spotify_values)), '', 'Creator export needed' if aggregate(spotify_values) is None else 'Imported dates · ' + scope_note.lower()),
+        last_card])
     links = []
     if not detail:
         for key, label in LABELS.items():

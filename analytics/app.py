@@ -321,8 +321,9 @@ def summary(db, now=None, limit=None, offset=0, query="", number=None):
     if number is not None:
         where, parameters = "number=?", [number]
     elif query:
-        where = "(instr(lower(title), lower(?))>0 OR CAST(number AS TEXT)=?)"
-        parameters = [query, query.lstrip("#")]
+        where = "(instr(lower(title), lower(?))>0 OR number=?)"
+        digits = query.lstrip("#")
+        parameters = [query, int(digits) if digits.isdecimal() else None]
     total = db.execute(f"SELECT count(*) FROM episodes WHERE {where}", parameters).fetchone()[0]
     rows = db.execute(f"""SELECT e.number,e.title,e.published,e.duration_seconds,p.views AS youtube_public_views,
         p.observed_at AS youtube_public_observed_at FROM episodes e
@@ -616,10 +617,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/podcast-logo.png":
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/podcast-logo.png":
             self.send(200, Path(__file__).with_name("podcast-logo.png").read_bytes(), "image/png")
             return
-        if self.path == "/health":
+        if path == "/health":
             try:
                 with closing(connect()) as db:
                     db.execute("SELECT 1")
@@ -635,8 +638,6 @@ class Handler(BaseHTTPRequestHandler):
             except sqlite3.Error:
                 self.send(503, "database unavailable")
             return
-        parsed = urllib.parse.urlsplit(self.path)
-        path = parsed.path.rstrip("/") or "/"
         params = urllib.parse.parse_qs(parsed.query)
         detail = re.fullmatch(r"/(?:api/)?episodes/(\d+)", path)
         archive = path in ("/episodes", "/api/episodes")
@@ -644,7 +645,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, "not found")
             return
         try:
-            page = int(params.get("page", ["1"])[0])
+            page = int(params.get("page", ["1"])[0]) if archive else 1
             if page < 1 or page > 1_000_000:
                 raise ValueError
         except ValueError:
