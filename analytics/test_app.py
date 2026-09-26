@@ -347,6 +347,36 @@ class AnalyticsTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_http_sorting_medians_and_optional_spotify(self):
+        self.populate_archive()
+        self.db.execute("INSERT INTO settings VALUES('coverage_start',?)", (self.now - app.DAY,))
+        for episode, count in ((3, 5), (40, 3)):
+            self.db.executemany("INSERT INTO downloads(episode,counted_at) VALUES(?,?)",
+                                [(episode, self.now + episode * app.DAY + 60)] * count)
+        self.db.commit()
+        server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            def fetch(path):
+                with app.urllib.request.urlopen(base + path) as response:
+                    return response.read().decode()
+            ranked = [e["number"] for e in json.loads(fetch("/api/episodes?sort=lifetime"))["episodes"]]
+            self.assertEqual(ranked[:2], [3, 40])
+            self.assertNotIn(3, [e["number"] for e in json.loads(fetch("/api/episodes?sort=lifetime&page=2"))["episodes"]])
+            self.assertIn('aria-sort="descending"><a href="/episodes?sort=lifetime"', fetch("/episodes?sort=lifetime"))
+            self.assertEqual(len(json.loads(fetch("/api/episodes?sort=bogus"))["episodes"]), 25)
+            self.assertIn("Median episode", fetch("/episodes/3"))
+            self.assertNotIn("sort=spotify", fetch("/"))
+            self.db.execute("INSERT INTO platform_daily VALUES('spotify','plays','2023-12-01',59,12)")
+            self.db.commit()
+            self.assertIn("sort=spotify", fetch("/"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_privacy_cleanup_removes_old_identifiers(self):
         self.assertEqual(app.ingest(self.db, self.event(), self.now), "counted")
         app.cleanup(self.db, self.now + 2 * app.DAY + 1)

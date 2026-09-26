@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from views import dashboard
+from views import SORTS, dashboard, medians, sort_episodes
 
 
 DB_PATH = os.getenv("DB_PATH", "/data/analytics.sqlite3")
@@ -654,9 +654,19 @@ class Handler(BaseHTTPRequestHandler):
         query = params.get("q", [""])[0].strip()[:200] if archive else ""
         mode = "episode" if detail else "archive" if archive else "recent"
         size = 1 if detail else 25 if archive else 10
+        sort = params.get("sort", [""])[0] if not detail else ""
+        sort = sort if sort in SORTS else ""
+        offset = (page - 1) * size if archive else 0
         with closing(connect()) as db:
-            data = summary(db, limit=size, offset=(page - 1) * size if archive else 0,
+            # A sorted archive ranks every match before paging; the catalogue is small enough to read whole.
+            data = summary(db, limit=None if archive and sort else size, offset=0 if archive and sort else offset,
                            query=query, number=int(detail[1]) if detail else None)
+            if sort:
+                ranked = sort_episodes(data["episodes"], sort, data["coverage_start"])
+                data.update(episodes=ranked[offset:offset + size] if archive else ranked, offset=offset, page_size=size)
+            if detail and data["episodes"]:
+                data["medians"] = medians(summary(db)["episodes"], data["coverage_start"])
+            data["synced"] = {row["source"]: row["succeeded_at"] for row in db.execute("SELECT source,succeeded_at FROM sync_state")}
         if detail and not data["episodes"]:
             self.send(404, "episode not found")
             return
@@ -669,7 +679,7 @@ class Handler(BaseHTTPRequestHandler):
             metric = params.get("metric", ["lifetime"])[0]
             if metric not in ("24h", "7d", "30d", "lifetime"):
                 metric = "lifetime"
-            self.send(200, dashboard(data, mode=mode, metric=metric), "text/html; charset=utf-8")
+            self.send(200, dashboard(data, mode=mode, metric=metric, sort=sort), "text/html; charset=utf-8")
 
 
 
