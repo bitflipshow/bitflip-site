@@ -1218,10 +1218,11 @@ print(json.dumps({'username': sys.argv[1], 'password': sys.argv[2]}))
 
   local http_status
   http_status=$(curl -s -o "$response_file" -w "%{http_code}" \
+    --connect-timeout 10 --max-time 30 \
     -X POST \
     -H "Content-Type: application/json" \
     -d "$auth_payload" \
-    "${FB_HOST}/api/login")
+    "${FB_HOST}/api/login") || true
 
   if [[ "$http_status" != "200" ]]; then
     log "WARNING: FileBrowser login failed (HTTP ${http_status}) — skipping FileBrowser upload."
@@ -1251,11 +1252,12 @@ upload_to_filebrowser() {
 
   local http_status
   http_status=$(retry 3 5 curl -s -o "$response_file" -w "%{http_code}" \
+    --connect-timeout 10 \
     -X POST \
     -H "X-Auth: ${FB_TOKEN}" \
     -H "Content-Type: application/octet-stream" \
     --data-binary @"$MP3_TEMP" \
-    "${FB_HOST}/api/resources/${FB_DEST_DIR}/${MP3_FILENAME}?override=true")
+    "${FB_HOST}/api/resources/${FB_DEST_DIR}/${MP3_FILENAME}?override=true") || true
 
   if [[ "$http_status" == "200" || "$http_status" == "204" ]]; then
     log "FileBrowser upload complete"
