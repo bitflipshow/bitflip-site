@@ -13,7 +13,7 @@
     "astro": "^7.3.3",
     "markdown-it": "^15.0.2",
     "sanitize-html": "^2.17.7",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "pagefind": "^1.5.2",
