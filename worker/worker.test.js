@@ -130,3 +130,18 @@ test("GET bodies use FixedLengthStream so Content-Length survives on the wire", 
     delete globalThis.FixedLengthStream;
   }
 });
+
+test("?raw=1 diagnostic path serves the body untouched and records nothing", async () => {
+  const events = [];
+  const mk = () => ({ size: 5, httpEtag: '"e"',
+    body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(5)); c.close(); } }),
+    writeHttpMetadata(h) { h.set("Content-Type", "audio/mpeg"); } });
+  const env = { AUDIO_BUCKET: { async head() { return mk(); }, async get() { return mk(); } },
+    ANALYTICS_EVENTS: { async put(_k, b) { events.push(b); } } };
+  const waits = [];
+  const res = await worker.fetch(new Request("https://audio.bitflip.show/e.mp3?raw=1"), env, { waitUntil(p) { waits.push(p); } });
+  assert.equal(res.headers.get("Content-Length"), "5");
+  assert.equal((await res.arrayBuffer()).byteLength, 5);
+  await Promise.all(waits);
+  assert.equal(events.length, 0);
+});
