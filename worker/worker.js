@@ -80,16 +80,18 @@ export default {
       headers.set("Content-Length", String(object.size));
     }
 
-    const record = (delivered) => {
-      if (!env.ANALYTICS_EVENTS || delivered < 1) return;
-      const start = range?.start ?? 0;
+    // The body is passed through untouched. Wrapping it in a JS stream to count
+    // delivered bytes made downloads end early on Cloudflare (verified A/B), so
+    // the event records the REQUESTED range, written when the response starts.
+    // Aborted downloads therefore count as fully requested.
+    if (request.method === "GET" && env.ANALYTICS_EVENTS) {
       const event = {
         method: "GET",
         status: range ? 206 : 200,
         filename,
         size: object.size,
-        start,
-        end: Math.min(start + delivered - 1, object.size - 1),
+        start: range?.start ?? 0,
+        end: range?.end ?? object.size - 1,
         ip: request.headers.get("CF-Connecting-IP") ?? "",
         userAgent: request.headers.get("User-Agent") ?? "",
         timestamp: Math.floor(Date.now() / 1000),
@@ -98,42 +100,9 @@ export default {
       ctx.waitUntil(env.ANALYTICS_EVENTS.put(key, JSON.stringify(event), {
         httpMetadata: { contentType: "application/json" },
       }).catch((error) => console.error("Analytics event write failed", error)));
-    };
-
-    // TEMPORARY DIAGNOSTIC: ?raw=1 serves the R2 body untouched (no analytics,
-    // no stream wrapping) to isolate download truncation. Remove after testing.
-    if (request.method === "GET" && new URL(request.url).searchParams.get("raw") === "1") {
-      return new Response(object.body, { status: range ? 206 : 200, headers });
     }
 
-    let body = null;
-    if (request.method === "GET") {
-      const length = range ? range.end - range.start + 1 : object.size;
-      let delivered = 0;
-      let recorded = false;
-      const finish = () => {
-        if (recorded) return;
-        recorded = true;
-        record(delivered);
-      };
-      const counter = new TransformStream({
-        transform(chunk, controller) {
-          delivered += chunk.byteLength;
-          controller.enqueue(chunk);
-        },
-      });
-      // FixedLengthStream keeps an exact Content-Length on the wire (a hand-built
-      // ReadableStream makes Cloudflare fall back to chunked encoding and an
-      // early close then looks like a complete download). Not present under Node.
-      const { readable, writable } = typeof FixedLengthStream === "function"
-        ? new FixedLengthStream(length)
-        : new TransformStream();
-      const piping = object.body.pipeThrough(counter).pipeTo(writable).then(finish, finish);
-      ctx.waitUntil(piping);
-      body = readable;
-    }
-
-    return new Response(body,
+    return new Response(request.method === "GET" ? object.body : null,
       { status: range ? 206 : 200, headers });
   },
 };

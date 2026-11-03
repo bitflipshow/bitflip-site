@@ -45,24 +45,6 @@ test("worker preserves range, HEAD, and event payload", async () => {
   }
 });
 
-test("early disconnect records only streamed bytes", async () => {
-  const events = [];
-  const object = { size: 100, httpEtag: '"etag"',
-    body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(20)); controller.close(); } }),
-    writeHttpMetadata() {} };
-  const env = { AUDIO_BUCKET: { async get() { return object; } },
-    ANALYTICS_EVENTS: { async put(_key, body) { events.push(JSON.parse(body)); } } };
-  const waits = [];
-  const response = await worker.fetch(new Request("https://audio.bitflip.show/episode.mp3", {
-    headers: { "CF-Connecting-IP": "8.8.8.8", "User-Agent": "PodcastApp/1" },
-  }), env, { waitUntil(promise) { waits.push(promise); } });
-  await response.arrayBuffer();
-  await Promise.all(waits);
-  assert.equal(events[0].status, 200);
-  assert.equal(events[0].start, 0);
-  assert.equal(events[0].end, 19);
-});
-
 test("encoded filenames are decoded and malformed escapes are rejected", async () => {
   const requested = [];
   const events = [];
@@ -85,63 +67,30 @@ test("encoded filenames are decoded and malformed escapes are rejected", async (
   assert.equal(requested.length, 1);
 });
 
-test("cancelled download is recorded even if the source cancel fails", async () => {
+test("full GET passes the R2 body through untouched and records the requested range", async () => {
   const events = [];
-  const object = { size: 100, httpEtag: '"etag"',
-    body: new ReadableStream({
-      start(controller) { controller.enqueue(new Uint8Array(20)); },
-      cancel() { throw new Error("source cancel failed"); },
-    }),
-    writeHttpMetadata() {} };
+  const body = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(100)); c.close(); } });
+  const object = { size: 100, httpEtag: '"etag"', body, writeHttpMetadata() {} };
   const env = { AUDIO_BUCKET: { async get() { return object; } },
-    ANALYTICS_EVENTS: { async put(_key, body) { events.push(JSON.parse(body)); } } };
+    ANALYTICS_EVENTS: { async put(_key, b) { events.push(JSON.parse(b)); } } };
   const waits = [];
   const response = await worker.fetch(new Request("https://audio.bitflip.show/episode.mp3", {
     headers: { "CF-Connecting-IP": "8.8.8.8", "User-Agent": "PodcastApp/1" },
-  }), env, { waitUntil(promise) { waits.push(promise); } });
-  const reader = response.body.getReader();
-  await reader.read();
-  await reader.cancel("client left").catch(() => {});
+  }), env, { waitUntil(p) { waits.push(p); } });
+  assert.equal(response.body, body, "body must not be wrapped");
+  assert.equal(response.headers.get("Content-Length"), "100");
   await Promise.all(waits);
   assert.equal(events.length, 1);
-  assert.equal(events[0].end, 19);
+  assert.deepEqual([events[0].status, events[0].start, events[0].end, events[0].size], [200, 0, 99, 100]);
 });
 
-test("GET bodies use FixedLengthStream so Content-Length survives on the wire", async () => {
-  const lengths = [];
-  globalThis.FixedLengthStream = class extends TransformStream {
-    constructor(length) { super(); lengths.push(length); }
-  };
-  try {
-    const mk = () => ({ size: 100, httpEtag: '"etag"',
-      body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(100)); c.close(); } }),
-      writeHttpMetadata(h) { h.set("Content-Type", "audio/mpeg"); } });
-    const env = { AUDIO_BUCKET: { async head() { return mk(); }, async get() { return mk(); } } };
-    const ctx = { waitUntil() {} };
-    const url = "https://audio.bitflip.show/episode.mp3";
-    const full = await worker.fetch(new Request(url), env, ctx);
-    assert.equal(full.headers.get("Content-Length"), "100");
-    assert.equal((await full.arrayBuffer()).byteLength, 100);
-    const part = await worker.fetch(new Request(url, { headers: { Range: "bytes=10-29" } }), env, ctx);
-    assert.equal(part.headers.get("Content-Length"), "20");
-    await part.arrayBuffer();
-    assert.deepEqual(lengths, [100, 20]);
-  } finally {
-    delete globalThis.FixedLengthStream;
-  }
-});
-
-test("?raw=1 diagnostic path serves the body untouched and records nothing", async () => {
-  const events = [];
-  const mk = () => ({ size: 5, httpEtag: '"e"',
-    body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(5)); c.close(); } }),
-    writeHttpMetadata(h) { h.set("Content-Type", "audio/mpeg"); } });
-  const env = { AUDIO_BUCKET: { async head() { return mk(); }, async get() { return mk(); } },
-    ANALYTICS_EVENTS: { async put(_k, b) { events.push(b); } } };
+test("analytics write failure never breaks the download", async () => {
+  const object = { size: 5, httpEtag: '"e"',
+    body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(5)); c.close(); } }), writeHttpMetadata() {} };
+  const env = { AUDIO_BUCKET: { async get() { return object; } },
+    ANALYTICS_EVENTS: { async put() { throw new Error("r2 down"); } } };
   const waits = [];
-  const res = await worker.fetch(new Request("https://audio.bitflip.show/e.mp3?raw=1"), env, { waitUntil(p) { waits.push(p); } });
-  assert.equal(res.headers.get("Content-Length"), "5");
-  assert.equal((await res.arrayBuffer()).byteLength, 5);
+  const response = await worker.fetch(new Request("https://audio.bitflip.show/e.mp3"), env, { waitUntil(p) { waits.push(p); } });
+  assert.equal((await response.arrayBuffer()).byteLength, 5);
   await Promise.all(waits);
-  assert.equal(events.length, 0);
 });
