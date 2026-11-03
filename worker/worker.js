@@ -102,7 +102,7 @@ export default {
 
     let body = null;
     if (request.method === "GET") {
-      const reader = object.body.getReader();
+      const length = range ? range.end - range.start + 1 : object.size;
       let delivered = 0;
       let recorded = false;
       const finish = () => {
@@ -110,30 +110,21 @@ export default {
         recorded = true;
         record(delivered);
       };
-      body = new ReadableStream({
-        async pull(controller) {
-          try {
-            const chunk = await reader.read();
-            if (chunk.done) {
-              finish();
-              controller.close();
-            } else {
-              delivered += chunk.value.byteLength;
-              controller.enqueue(chunk.value);
-            }
-          } catch (error) {
-            finish();
-            controller.error(error);
-          }
-        },
-        async cancel(reason) {
-          try {
-            await reader.cancel(reason);
-          } finally {
-            finish();
-          }
+      const counter = new TransformStream({
+        transform(chunk, controller) {
+          delivered += chunk.byteLength;
+          controller.enqueue(chunk);
         },
       });
+      // FixedLengthStream keeps an exact Content-Length on the wire (a hand-built
+      // ReadableStream makes Cloudflare fall back to chunked encoding and an
+      // early close then looks like a complete download). Not present under Node.
+      const { readable, writable } = typeof FixedLengthStream === "function"
+        ? new FixedLengthStream(length)
+        : new TransformStream();
+      const piping = object.body.pipeThrough(counter).pipeTo(writable).then(finish, finish);
+      ctx.waitUntil(piping);
+      body = readable;
     }
 
     return new Response(body,

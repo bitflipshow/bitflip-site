@@ -106,3 +106,27 @@ test("cancelled download is recorded even if the source cancel fails", async () 
   assert.equal(events.length, 1);
   assert.equal(events[0].end, 19);
 });
+
+test("GET bodies use FixedLengthStream so Content-Length survives on the wire", async () => {
+  const lengths = [];
+  globalThis.FixedLengthStream = class extends TransformStream {
+    constructor(length) { super(); lengths.push(length); }
+  };
+  try {
+    const mk = () => ({ size: 100, httpEtag: '"etag"',
+      body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(100)); c.close(); } }),
+      writeHttpMetadata(h) { h.set("Content-Type", "audio/mpeg"); } });
+    const env = { AUDIO_BUCKET: { async head() { return mk(); }, async get() { return mk(); } } };
+    const ctx = { waitUntil() {} };
+    const url = "https://audio.bitflip.show/episode.mp3";
+    const full = await worker.fetch(new Request(url), env, ctx);
+    assert.equal(full.headers.get("Content-Length"), "100");
+    assert.equal((await full.arrayBuffer()).byteLength, 100);
+    const part = await worker.fetch(new Request(url, { headers: { Range: "bytes=10-29" } }), env, ctx);
+    assert.equal(part.headers.get("Content-Length"), "20");
+    await part.arrayBuffer();
+    assert.deepEqual(lengths, [100, 20]);
+  } finally {
+    delete globalThis.FixedLengthStream;
+  }
+});
