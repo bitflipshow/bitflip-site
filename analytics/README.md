@@ -1,6 +1,6 @@
 # BitFlip podcast analytics
 
-This service keeps podcast download counts in SQLite on `infra-svcs` and serves a private dashboard through the `metrics` Tailscale node. The audio Worker writes short-lived request events into a **private** R2 bucket. The service polls that bucket every five minutes, counts qualified downloads, and deletes each processed event. No public ingest endpoint is needed.
+This service keeps podcast download counts in SQLite on `infra-svcs` and serves a private dashboard through the `metrics` Tailscale node. The audio Worker writes short-lived request events into a **private** R2 bucket. Since 2026-11 the Worker records the *requested* byte range when a response starts, not the bytes actually delivered, because counting delivered bytes required wrapping the audio stream, which made downloads end early. Cancelled or aborted downloads therefore count as fully requested, so counts run slightly high and are not strictly comparable with earlier data. The service polls that bucket every five minutes, counts qualified downloads, and deletes each processed event. No public ingest endpoint is needed.
 
 ## Metrics
 
