@@ -100,6 +100,12 @@ export default {
       }).catch((error) => console.error("Analytics event write failed", error)));
     };
 
+    // TEMPORARY DIAGNOSTIC: ?raw=1 serves the R2 body untouched (no analytics,
+    // no stream wrapping) to isolate download truncation. Remove after testing.
+    if (request.method === "GET" && new URL(request.url).searchParams.get("raw") === "1") {
+      return new Response(object.body, { status: range ? 206 : 200, headers });
+    }
+
     let body = null;
     if (request.method === "GET") {
       const length = range ? range.end - range.start + 1 : object.size;
