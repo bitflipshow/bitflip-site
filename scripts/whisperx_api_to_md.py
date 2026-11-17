@@ -1,149 +1,155 @@
 #!/usr/bin/env python3
-"""
-Convert a WhisperX API verbose_json response (single-file, diarized) to the
-BitFlip transcript markdown format.
+"""Convert a WhisperX verbose_json response to BitFlip transcript Markdown."""
 
-Usage:
-    python3 whisperx_api_to_md.py <response.json> <output.md>
-
-Input: verbose_json from POST /v1/audio/transcriptions with diarize=true, align=true
-Output: markdown in the format used by transcribe.py:
-    **Speaker_0**: text
-    *00:01:23*
-
-"""
+from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+try:
+    from .transcript_common import (
+        fmt_ts,
+        is_filler_phrase,
+        segment_bounds,
+        segment_is_suppressible_filler,
+        speaker_name,
+        validate_segments,
+        valid_word_bounds,
+    )
+except ImportError:  # direct execution as `python scripts/whisperx_api_to_md.py`
+    from transcript_common import (
+        fmt_ts,
+        is_filler_phrase,
+        segment_bounds,
+        segment_is_suppressible_filler,
+        speaker_name,
+        validate_segments,
+        valid_word_bounds,
+    )
+
+MERGE_GAP = 5.0
+MERGE_MIN_WORDS = 4
 
 
-def fmt_ts(s):
-    h   = int(s // 3600)
-    m   = int((s % 3600) // 60)
-    sec = int(s % 60)
-    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+def convert(data: Any, source: str = "response") -> tuple[str, int, int]:
+    segments = validate_segments(data, source)
+    lines: list[tuple[float, str, str, float]] = []
+    dropped_fillers = 0
+    kept_filler_candidates = 0
 
+    for index, segment in enumerate(segments):
+        seg_start, seg_end = segment_bounds(segment)
+        text = segment.get("text", "").strip()
+        if segment_is_suppressible_filler(segment):
+            dropped_fillers += 1
+            continue
+        if text and is_filler_phrase(text):
+            kept_filler_candidates += 1
 
-def get_speaker(seg, word=None):
-    """Get speaker label from word or segment, normalised to Speaker_N style."""
-    raw = None
-    if word:
-        raw = word.get("speaker")
-    if not raw:
-        raw = seg.get("speaker")
-    if not raw:
-        return "Speaker"
-    return raw.replace("SPEAKER_", "Speaker_")
-
-
-def main():
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <response.json> <output.md>")
-        sys.exit(1)
-
-    response_file = sys.argv[1]
-    out_path      = sys.argv[2]
-
-    with open(response_file) as f:
-        data = json.load(f)
-
-    segments = data.get("segments", [])
-    if not segments:
-        print("WARNING: no segments in response", file=sys.stderr)
-        open(out_path, "w").close()
-        sys.exit(0)
-
-    # --------------------------------------------------
-    # Build (start, speaker, text, end) lines from word-level data,
-    # grouping consecutive words by speaker — mirrors transcribe.py exactly.
-    # --------------------------------------------------
-
-    MERGE_GAP       = 5.0
-    MERGE_MIN_WORDS = 4
-
-    lines = []  # (start, speaker, text, end)
-
-    for seg in segments:
-        words = seg.get("words", [])
-
+        words = segment.get("words", [])
         if not words:
-            text = seg.get("text", "").strip()
             if text:
-                spk   = get_speaker(seg)
-                start = seg.get("start", 0)
-                end   = seg.get("end", start)
-                lines.append((start, spk, text, end))
+                lines.append((seg_start, speaker_name(segment.get("speaker")), text, seg_end))
             continue
 
-        cur_spk   = get_speaker(seg, words[0])
-        cur_start = words[0].get("start", seg.get("start", 0))
-        cur_end   = cur_start
-        cur_words = []
+        current_speaker: str | None = None
+        current_start = seg_start
+        current_end = seg_start
+        current_words: list[str] = []
 
-        for w in words:
-            spk  = get_speaker(seg, w)
-            text = w.get("word", "").strip()
-            wend = w.get("end", cur_end)
+        def flush() -> None:
+            if current_words and current_speaker is not None:
+                lines.append((current_start, current_speaker, " ".join(current_words), current_end))
 
-            if spk != cur_spk:
-                joined = " ".join(cur_words).strip()
-                if joined:
-                    lines.append((cur_start, cur_spk, joined, cur_end))
-                cur_spk   = spk
-                cur_start = w.get("start", cur_end)
-                cur_end   = cur_start
-                cur_words = []
+        for word in words:
+            if not isinstance(word, dict):
+                raise ValueError(f"{source}: segment {index} contains a non-object word")
+            word_text = word.get("word", "")
+            if not isinstance(word_text, str):
+                raise ValueError(f"{source}: segment {index} contains invalid word text")
+            word_text = word_text.strip()
+            word_start, word_end = valid_word_bounds(word, seg_start)
+            word_speaker = speaker_name(word.get("speaker"), speaker_name(segment.get("speaker")))
 
-            if text:
-                cur_words.append(text)
-            cur_end = wend
+            if current_speaker is None:
+                current_speaker = word_speaker
+                current_start = word_start
+                current_end = word_start
+            elif word_speaker != current_speaker:
+                flush()
+                current_speaker = word_speaker
+                current_start = word_start
+                current_end = word_start
+                current_words = []
 
-        joined = " ".join(cur_words).strip()
-        if joined:
-            lines.append((cur_start, cur_spk, joined, cur_end))
+            if word_text:
+                current_words.append(word_text)
+            current_end = max(current_end, word_end)
 
-    # --------------------------------------------------
-    # Merge consecutive same-speaker lines into paragraphs
-    # --------------------------------------------------
+        flush()
 
-    merged = []
-    for start, spk, text, end in lines:
-        if merged and merged[-1][1] == spk:
-            prev_start, prev_spk, prev_text, prev_end = merged[-1]
-            gap = start - prev_end
-            if gap < MERGE_GAP and len(prev_text.split()) >= MERGE_MIN_WORDS:
-                merged[-1] = (prev_start, prev_spk, prev_text + " " + text, end)
+    lines.sort(key=lambda row: row[0])
+    merged: list[tuple[float, str, str, float]] = []
+    for start, speaker, text, end in lines:
+        if merged and merged[-1][1] == speaker:
+            prev_start, prev_speaker, prev_text, prev_end = merged[-1]
+            if start - prev_end < MERGE_GAP and len(prev_text.split()) >= MERGE_MIN_WORDS:
+                merged[-1] = (prev_start, prev_speaker, f"{prev_text} {text}", max(end, prev_end))
                 continue
-        merged.append((start, spk, text, end))
+        merged.append((start, speaker, text, end))
 
-    # --------------------------------------------------
-    # Filter ASR hallucinations (short filler phrases Whisper inserts in silence)
-    # --------------------------------------------------
+    if not merged:
+        raise ValueError(f"{source}: no transcript lines remain after parsing")
 
-    FILLER_PHRASES = {
-        "thank you", "thanks", "thank you so much", "thanks so much",
-        "thank you very much", "thanks very much",
-        "bye", "goodbye", "bye bye", "see you", "see ya",
-        "you're welcome", "youre welcome",
-    }
+    output = "".join(
+        f"**{speaker}**: {text}\n*{fmt_ts(start)}*\n\n"
+        for start, speaker, text, _ in merged
+    )
+    return output, dropped_fillers, kept_filler_candidates
 
-    def is_filler(text):
-        normalised = text.lower().strip().rstrip(".,!?")
-        return normalised in FILLER_PHRASES
 
-    merged = [(s, spk, t, e) for s, spk, t, e in merged if not is_filler(t)]
+def write_atomic(path: str, content: str) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as output:
+            output.write(content)
+        os.replace(temp_name, destination)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
-    # --------------------------------------------------
-    # Write markdown
-    # --------------------------------------------------
 
-    with open(out_path, "w") as f:
-        for start, spk, text, _ in merged:
-            f.write(f"**{spk}**: {text}\n")
-            f.write(f"*{fmt_ts(start)}*\n\n")
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <response.json> <output.md>", file=sys.stderr)
+        return 2
+    response_path, output_path = sys.argv[1:]
+    try:
+        with open(response_path, encoding="utf-8") as source:
+            data = json.load(source)
+        content, dropped, kept = convert(data, response_path)
+        write_atomic(output_path, content)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
 
-    print(f"Transcript written: {out_path} ({len(merged)} lines)")
+    line_count = sum(1 for line in content.splitlines() if line.startswith("**"))
+    print(f"Transcript written: {output_path} ({line_count} lines)")
+    if dropped:
+        print(f"Suppressed {dropped} standalone filler phrase(s) with strong non-speech evidence")
+    if kept:
+        print(f"Kept {kept} standalone filler candidate(s): not enough evidence to suppress")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
