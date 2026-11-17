@@ -43,6 +43,10 @@ WHISPER_API_URL="localhost:8200"
 WHISPER_API_KEY="" # optional
 WHISPER_MODEL="large-v3-turbo"
 WHISPER_LANG="en"
+# This API wrapper forwards vad_filter to WhisperX's pipeline (unsupported).
+# Keep false; the WhisperX pipeline still runs its own VAD internally.
+WHISPER_VAD_FILTER="false"
+WHISPER_VAD_THRESHOLD="0.5"
 
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"
 CLAUDE_MODEL="claude-haiku-4-5"
@@ -159,7 +163,7 @@ resolve_episode_files() {
   fi
   MD_FILE="$md"
 
-  # Prefer MP3 over WAV when both exist
+  # Prefer WAV for transcription; otherwise retain the publication-path MP3 preference.
   local audio_match=""
   local wav_match=""
   while IFS= read -r -d '' candidate; do
@@ -169,17 +173,19 @@ resolve_episode_files() {
     corename="${bname#*bitflip-e}"
     epnum="${corename%%.*}"
     if [[ "$epnum" =~ ^[0-9]+$ ]] && [[ "$((10#$epnum))" -eq "$((10#$num))" ]]; then
-      if [[ "$ext" == "mp3" ]]; then
+      if [[ "$ext" == "mp3" && -z "$audio_match" ]]; then
         audio_match="$candidate"
-        break
       elif [[ "$ext" == "wav" && -z "$wav_match" ]]; then
         wav_match="$candidate"
       fi
     fi
   done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "*.wav" -o -name "*.mp3" \) -print0 2>/dev/null | sort -z)
 
-  # Fall back to WAV if no MP3 found
-  audio_match="${audio_match:-$wav_match}"
+  if [[ "$DO_TRANSCRIBE" == true && -n "$wav_match" ]]; then
+    audio_match="$wav_match"
+  else
+    audio_match="${audio_match:-$wav_match}"
+  fi
 
   if [[ -z "$audio_match" ]]; then
     fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
@@ -210,16 +216,19 @@ resolve_audio_only() {
     corename="${bname#*bitflip-e}"
     epnum="${corename%%.*}"
     if [[ "$epnum" =~ ^[0-9]+$ ]] && [[ "$((10#$epnum))" -eq "$((10#$num))" ]]; then
-      if [[ "$ext" == "mp3" ]]; then
+      if [[ "$ext" == "mp3" && -z "$audio_match" ]]; then
         audio_match="$candidate"
-        break
       elif [[ "$ext" == "wav" && -z "$wav_match" ]]; then
         wav_match="$candidate"
       fi
     fi
   done < <(find "${script_dir}/${AUDIO_DIR}" -maxdepth 1 \( -name "*.wav" -o -name "*.mp3" \) -print0 2>/dev/null | sort -z)
 
-  audio_match="${audio_match:-$wav_match}"
+  if [[ "$DO_TRANSCRIBE" == true && -n "$wav_match" ]]; then
+    audio_match="$wav_match"
+  else
+    audio_match="${audio_match:-$wav_match}"
+  fi
 
   if [[ -z "$audio_match" ]]; then
     fatal "Audio file not found in ${AUDIO_DIR}/ matching bitflip-e*${num}.wav/mp3"
@@ -255,13 +264,14 @@ usage() {
 }
 
 parse_args() {
-  # Pre-scan for --transcript-output so a numeric episode arg (which may
-  # appear before the flag) knows whether to require an existing episode .md.
+  # Pre-scan flags because episode resolution happens while parsing positional args.
+  # Transcription should use WAV when available; transcript-only mode needs the same.
   local arg
   for arg in "$@"; do
-    if [[ "$arg" == "--transcript-output" ]]; then
-      TRANSCRIPT_OUTPUT="__pending__"
-    fi
+    case "$arg" in
+      --transcript-output) TRANSCRIPT_OUTPUT="__pending__"; DO_TRANSCRIBE=true ;;
+      --transcribe) DO_TRANSCRIBE=true ;;
+    esac
   done
 
   while [[ $# -gt 0 ]]; do
@@ -619,9 +629,11 @@ transcribe_single_api() {
     --max-time 1800 \
     "${auth_args[@]}" \
     -X POST "${WHISPER_API_URL}/v1/audio/transcriptions" \
-    -F "file=@${MP3_TEMP}" \
+    -F "file=@${SOURCE_AUDIO}" \
     -F "model=${WHISPER_MODEL}" \
     -F "language=${WHISPER_LANG}" \
+    -F "vad_filter=${WHISPER_VAD_FILTER}" \
+    -F "vad_threshold=${WHISPER_VAD_THRESHOLD}" \
     -F "diarize=true" \
     -F "align=true" \
     -F "response_format=verbose_json" \
@@ -657,6 +669,9 @@ transcribe_tracks_api() {
     speaker=$(echo "$bname" | sed 's/\.[^.]*$//' | \
               awk -F- '{print toupper(substr($NF,1,1)) substr($NF,2)}')
     out_file="${json_dir}/${speaker}.json"
+    if [[ -e "$out_file" ]]; then
+      fatal "Duplicate speaker label '${speaker}' derived from track names; rename tracks so each final dash-delimited name is unique."
+    fi
 
     log "  Transcribing track: ${speaker} (${bname})"
 
@@ -667,6 +682,8 @@ transcribe_tracks_api() {
       -F "file=@${track}" \
       -F "model=${WHISPER_MODEL}" \
       -F "language=${WHISPER_LANG}" \
+      -F "vad_filter=${WHISPER_VAD_FILTER}" \
+      -F "vad_threshold=${WHISPER_VAD_THRESHOLD}" \
       -F "diarize=false" \
       -F "align=true" \
       -F "response_format=verbose_json")
