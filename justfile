@@ -32,20 +32,36 @@ preview: build
 # Data pull
 # ------------------------------------------------------------
 
-# Pull episode doc from Outline and audio from FileBrowser, create the episode .md file
+# Pull episode doc from Outline and audio from R2, create the episode .md file
 # Usage: just pull 3
-pull episode:
-    ./pull-data.sh "{{ episode }}"
+pull episode *flags:
+    ./pull-data.sh "{{ episode }}" {{ flags }}
 
 # Pull episode doc from Outline only (skip audio download)
+# Fails if the episode file exists; use refresh-notes to update an existing one.
 # Usage: just pull-notes 3
-pull-notes episode:
-    ./pull-data.sh "{{ episode }}" --skip-audio
+pull-notes episode *flags:
+    ./pull-data.sh "{{ episode }}" --skip-audio {{ flags }}
 
-# Pull audio (and speaker tracks) only from R2/FileBrowser (skip Outline doc)
+# Update the episode file from Outline, or create it if missing. Keeps the
+# transcript, audioUrl/audioSize/duration, the draft flag and generated chapters.
+# Usage: just refresh-notes 3
+refresh-notes episode *flags:
+    ./pull-data.sh "{{ episode }}" --skip-audio --refresh {{ flags }}
+
+# Pull audio (and speaker tracks) only from R2 (skip Outline doc).
+# Files that are already current are skipped; add --force-audio to fetch anyway.
 # Usage: just pull-audio 3
-pull-audio episode:
-    ./pull-data.sh "{{ episode }}" --skip-notes
+#        just pull-audio 3 --force-audio
+pull-audio episode *flags:
+    ./pull-data.sh "{{ episode }}" --skip-notes {{ flags }}
+
+# Check that the editor's files (full audio + speaker stems) are in R2.
+# Changes nothing; exit status 0 means ready.
+# Usage: just check-audio 3
+#        just check-audio 3 --no-stems-ok
+check-audio episode *flags:
+    ./pull-data.sh "{{ episode }}" --check-audio {{ flags }}
 
 # ------------------------------------------------------------
 # Publishing recipes

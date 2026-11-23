@@ -39,7 +39,8 @@ DEFAULT_COVER="public/images/podcast-cover-small.png"
 MP3_BITRATE="128k"
 MP3_CHANNELS="2"
 
-WHISPER_API_URL="localhost:8200"
+# Override with the WHISPER_API_URL env var (the Runner sets it to the tailnet instance).
+WHISPER_API_URL="${WHISPER_API_URL:-localhost:8200}"
 WHISPER_API_KEY="" # optional
 WHISPER_MODEL="large-v3-turbo"
 WHISPER_LANG="en"
@@ -49,7 +50,7 @@ WHISPER_VAD_FILTER="false"
 WHISPER_VAD_THRESHOLD="0.5"
 
 ANTHROPIC_API_KEY_FILE="~/.config/bitflip/anthropic_api_key"
-CLAUDE_MODEL="claude-haiku-4-5"
+CLAUDE_MODEL="claude-haiku-5-5"
 SKIP_CLAUDE_FIX=false
 
 # Directories used for auto-resolution when an episode number is given
@@ -793,13 +794,14 @@ Known corrections to apply (and similar patterns):
 Return ONLY the corrected text — no commentary, no preamble, no explanation."""
 
 CHUNK_CHARS = 25000
-MAX_TOKENS = 8192
+MAX_TOKENS = 16000
 MAX_RETRIES = 3
 
 def call_claude(chunk):
     payload = {
         "model": model,
         "max_tokens": MAX_TOKENS,
+        "output_config": {"effort": "low"},
         "system": SYSTEM,
         "messages": [{"role": "user", "content": chunk}],
     }
@@ -814,7 +816,10 @@ def call_claude(chunk):
     )
     with urllib.request.urlopen(req) as resp:
         data = json.loads(resp.read())
-    return data.get("content", [{}])[0].get("text", "")
+    # Haiku 5.5 may put thinking blocks first: read text blocks by type.
+    if data.get("stop_reason") != "end_turn":
+        raise RuntimeError(f"stop_reason={data.get('stop_reason')} (output incomplete)")
+    return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 with open(transcript_file) as f:
     content = f.read()
@@ -954,7 +959,8 @@ import json, sys
 model, prompt, out = sys.argv[1], sys.argv[2], sys.argv[3]
 payload = {
     "model": model,
-    "max_tokens": 1024,
+    "max_tokens": 4096,
+    "output_config": {"effort": "low"},
     "messages": [{"role": "user", "content": prompt}],
 }
 with open(out, "w") as f:
@@ -986,7 +992,11 @@ PYEOF
 import json, sys
 with open('${response_file}') as f:
     data = json.load(f)
-text = data.get('content', [{}])[0].get('text', '')
+# Haiku 5.5 may put thinking blocks first: read text blocks by type.
+if data.get('stop_reason') != 'end_turn':
+    sys.stderr.write(f\"stop_reason={data.get('stop_reason')}\\n\")
+    sys.exit(0)
+text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
 print(text, end='')
 ")
 
