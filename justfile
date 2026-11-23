@@ -56,6 +56,13 @@ refresh-notes episode *flags:
 pull-audio episode *flags:
     ./pull-data.sh "{{ episode }}" --skip-notes {{ flags }}
 
+# Pull the editor's final video only (production/video/ in R2) to video/.
+# Skips the download when the local copy is current. Doesn't touch git or Outline.
+# Usage: just pull-video 3
+#        just pull-video 3 --force-video
+pull-video episode *flags:
+    ./pull-data.sh "{{ episode }}" --video {{ flags }}
+
 # Check that the editor's files (full audio + speaker stems) are in R2.
 # Changes nothing; exit status 0 means ready.
 # Usage: just check-audio 3

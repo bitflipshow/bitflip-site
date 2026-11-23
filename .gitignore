@@ -5,6 +5,7 @@ dist/
 
 # audio files
 audio/
+video/
 *.mp3
 *.wav
 *.flac

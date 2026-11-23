@@ -9,6 +9,7 @@
 # Usage:
 #   ./pull-data.sh <episode-number> [--skip-audio] [--skip-notes] [--refresh] [--force-audio]
 #   ./pull-data.sh <episode-number> --check-audio [--no-stems-ok]
+#   ./pull-data.sh <episode-number> --video [--force-video]
 #   ./pull-data.sh 3
 #   ./pull-data.sh 42 --skip-audio
 #   ./pull-data.sh 42 --skip-notes
@@ -25,6 +26,10 @@
 #   --check-audio  Only check that the editor's files are in R2 (full audio and
 #                  speaker stems). Changes nothing; exit 0 means ready.
 #   --no-stems-ok  With --check-audio, don't require speaker stems.
+#   --video        Only download the editor's final video (production/video/ in R2)
+#                  to video/bitflip-eNNNN.<ext>. Skips the download when the local
+#                  copy is current. Does not touch git or Outline.
+#   --force-video  With --video, download the video again even if it is current.
 #
 # What --refresh keeps from the existing episode file:
 #   audioUrl, audioSize, duration  (written by publish.sh) unless Outline sets them
@@ -56,6 +61,7 @@ FB_PASS_FILE="~/.config/bitflip/fb_password"
 FB_REMOTE_DIR="audio-production"
 FB_RAW_DIR="audio-transcript"
 AUDIO_DIR="audio"
+VIDEO_DIR="video"
 
 # R2 (via rclone) — audio source
 R2_REMOTE="production-audio"  # rclone remote name (from rclone config)
@@ -63,6 +69,7 @@ R2_BUCKET="recorded-files"    # R2 bucket name
 R2_BASE_DIR="PodBooth"        # Folder inside the bucket containing "Episode N" subfolders
 R2_FULL_DIR="production/full"         # Subfolder holding the full episode audio
 R2_SPEAKERS_DIR="production/speakers" # Subfolder holding per-speaker tracks
+R2_VIDEO_DIR="production/video"       # Subfolder holding the final episode video
 
 ########################################
 # Globals
@@ -79,6 +86,8 @@ REFRESH=false
 FORCE_AUDIO=false
 CHECK_AUDIO=false
 NO_STEMS_OK=false
+PULL_VIDEO=false
+FORCE_VIDEO=false
 
 ########################################
 # Utility
@@ -101,6 +110,7 @@ require() {
 usage() {
   echo "Usage: $0 <episode-number> [--skip-audio] [--skip-notes] [--refresh] [--force-audio]"
   echo "       $0 <episode-number> --check-audio [--no-stems-ok]"
+  echo "       $0 <episode-number> --video [--force-video]"
   echo "Example: $0 3"
   echo "         $0 42 --skip-audio"
   echo "         $0 42 --skip-notes"
@@ -128,10 +138,22 @@ parse_args() {
       --force-audio) FORCE_AUDIO=true ;;
       --check-audio) CHECK_AUDIO=true ;;
       --no-stems-ok) NO_STEMS_OK=true ;;
+      --video) PULL_VIDEO=true ;;
+      --force-video) FORCE_VIDEO=true ;;
       *) usage ;;
     esac
     shift
   done
+
+  if [[ "$PULL_VIDEO" == true ]]; then
+    if [[ "$CHECK_AUDIO" == true || "$SKIP_AUDIO" == true || "$SKIP_NOTES" == true || "$REFRESH" == true || "$FORCE_AUDIO" == true || "$NO_STEMS_OK" == true ]]; then
+      fatal "--video only downloads the video and cannot be combined with other options (except --force-video)."
+    fi
+    return
+  fi
+  if [[ "$FORCE_VIDEO" == true ]]; then
+    fatal "--force-video only applies to --video."
+  fi
 
   if [[ "$CHECK_AUDIO" == true ]]; then
     if [[ "$SKIP_AUDIO" == true || "$SKIP_NOTES" == true || "$REFRESH" == true || "$FORCE_AUDIO" == true ]]; then
@@ -928,7 +950,7 @@ print(item.get('Size', -1), int(ts))
 # matches until the editor uploads a new version.
 local_is_current() {
   local local_path="$1" remote_path="$2"
-  [[ "$FORCE_AUDIO" == true ]] && return 1
+  [[ "$FORCE_AUDIO" == true || "$FORCE_VIDEO" == true ]] && return 1
   [[ -f "$local_path" ]] || return 1
 
   local remote_stat remote_size remote_mtime
@@ -1100,6 +1122,59 @@ print(sys.argv[2] + '-' + speaker.lower() + '.' + ext.lower())
 }
 
 ########################################
+# R2 Video Fetch (--video)
+########################################
+
+# Download the editor's final video to video/bitflip-eNNNN.<ext>. If the editor
+# uploaded more than one video, the largest is used. Prints the local path.
+fetch_video_r2() {
+  header "Fetching video from R2" >&2
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local local_video_dir="${script_dir}/${VIDEO_DIR}"
+
+  local ep_dir
+  ep_dir=$(r2_find_episode_dir)
+  [[ -n "$ep_dir" ]] || fatal "No episode directory found in '${R2_BASE_DIR}/' matching episode ${EPISODE_NUM}."
+
+  local video_remote="${R2_BASE_DIR}/${ep_dir}/${R2_VIDEO_DIR}"
+  local video_file
+  video_file=$(rclone lsjson "${R2_REMOTE}:${R2_BUCKET}/${video_remote}" 2>/dev/null | python3 -c "
+import json, re, sys
+try:
+    items = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(0)
+vids = [i for i in items if not i.get('IsDir') and re.search(r'\.(mp4|mov|mkv|webm|m4v)$', i.get('Name', ''), re.I)]
+if not vids:
+    sys.exit(0)
+vids.sort(key=lambda i: i.get('Size', 0), reverse=True)
+if len(vids) > 1:
+    sys.stderr.write(f\"WARNING: {len(vids)} videos found, using the largest: '{vids[0]['Name']}'.\\n\")
+print(vids[0]['Name'])
+" || true)
+
+  [[ -n "$video_file" ]] || fatal "No video (.mp4, .mov, .mkv, .webm, .m4v) found in '${video_remote}/' on R2 yet."
+
+  local video_ext
+  video_ext=$(python3 -c "import sys; print(sys.argv[1].rsplit('.', 1)[-1].lower())" "$video_file")
+  local video_local="${local_video_dir}/bitflip-e${EPISODE_NUM_PADDED}.${video_ext}"
+  mkdir -p "$local_video_dir"
+
+  if local_is_current "$video_local" "${video_remote}/${video_file}"; then
+    log "Up to date, skipping download: $(basename "$video_local") (use --force-video to fetch again)" >&2
+  else
+    log "Downloading: ${video_file} → $(basename "$video_local")" >&2
+    rclone copyto --ignore-times -v --stats-one-line --stats=15s \
+      "${R2_REMOTE}:${R2_BUCKET}/${video_remote}/${video_file}" "$video_local" >&2 \
+      || fatal "Failed to download '${video_file}' from R2."
+  fi
+  log "Video saved: ${video_local}" >&2
+  echo "$video_local"
+}
+
+########################################
 # R2 Readiness Check (--check-audio)
 ########################################
 
@@ -1124,6 +1199,9 @@ check_audio_r2() {
 
   log "Full audio:    ${full_count} file(s) in ${R2_FULL_DIR}/"
   log "Speaker stems: ${track_count} file(s) in ${R2_SPEAKERS_DIR}/"
+  local video_count
+  video_count=$(grep -Eic '\.(mp4|mov|mkv|webm|m4v)$' <<< "$(r2_list_dir "${R2_BASE_DIR}/${ep_dir}/${R2_VIDEO_DIR}")" || true)
+  log "Video:         ${video_count} file(s) in ${R2_VIDEO_DIR}/ (not required for this check)"
 
   local ready=true
   if (( full_count == 0 )); then
@@ -1184,6 +1262,15 @@ main() {
       exit 0
     fi
     exit 1
+  fi
+
+  if [[ "$PULL_VIDEO" == true ]]; then
+    [[ "$AUDIO_SOURCE" == "r2" ]] || fatal "--video only works with AUDIO_SOURCE=r2."
+    require rclone
+    rclone listremotes 2>/dev/null | grep -qx "${R2_REMOTE}:" \
+      || fatal "rclone remote '${R2_REMOTE}' not configured — run 'rclone config'."
+    fetch_video_r2 >/dev/null
+    exit 0
   fi
 
   # Fail before touching git or Outline when the episode file would be overwritten.
