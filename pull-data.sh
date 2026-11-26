@@ -7,11 +7,35 @@
 # and speaker tracks into the local audio directory.
 #
 # Usage:
-#   ./pull-data.sh <episode-number> [--skip-audio]
-#   ./pull-data.sh <episode-number> --skip-notes
+#   ./pull-data.sh <episode-number> [--skip-audio] [--skip-notes] [--refresh] [--force-audio]
+#   ./pull-data.sh <episode-number> --check-audio [--no-stems-ok]
+#   ./pull-data.sh <episode-number> --video [--force-video]
 #   ./pull-data.sh 3
 #   ./pull-data.sh 42 --skip-audio
 #   ./pull-data.sh 42 --skip-notes
+#   ./pull-data.sh 42 --skip-audio --refresh
+#   ./pull-data.sh 42 --check-audio
+#
+# Safe reruns:
+#   --refresh      If episodes/NNNN.md already exists, update it from Outline
+#                  instead of failing. The audio fields, the transcript, the
+#                  draft flag and generated chapters are kept (see below).
+#   --force-audio  Download audio again even if the local copy is current.
+#                  Without it, files whose size and modification time match
+#                  the R2 copy are skipped.
+#   --check-audio  Only check that the editor's files are in R2 (full audio and
+#                  speaker stems). Changes nothing; exit 0 means ready.
+#   --no-stems-ok  With --check-audio, don't require speaker stems.
+#   --video        Only download the editor's final video (production/video/ in R2)
+#                  to video/bitflip-eNNNN.<ext>. Skips the download when the local
+#                  copy is current. Does not touch git or Outline.
+#   --force-video  With --video, download the video again even if it is current.
+#
+# What --refresh keeps from the existing episode file:
+#   audioUrl, audioSize, duration  (written by publish.sh) unless Outline sets them
+#   draft                          unless Outline sets it
+#   chapters                       unless Outline provides chapters
+#   ## Transcript section          unless it is empty or the placeholder
 #
 # Requirements:
 #   curl, python3, rclone (for AUDIO_SOURCE=r2)
@@ -37,6 +61,7 @@ FB_PASS_FILE="~/.config/bitflip/fb_password"
 FB_REMOTE_DIR="audio-production"
 FB_RAW_DIR="audio-transcript"
 AUDIO_DIR="audio"
+VIDEO_DIR="video"
 
 # R2 (via rclone) — audio source
 R2_REMOTE="production-audio"  # rclone remote name (from rclone config)
@@ -44,6 +69,7 @@ R2_BUCKET="recorded-files"    # R2 bucket name
 R2_BASE_DIR="PodBooth"        # Folder inside the bucket containing "Episode N" subfolders
 R2_FULL_DIR="production/full"         # Subfolder holding the full episode audio
 R2_SPEAKERS_DIR="production/speakers" # Subfolder holding per-speaker tracks
+R2_VIDEO_DIR="production/video"       # Subfolder holding the final episode video
 
 ########################################
 # Globals
@@ -56,6 +82,12 @@ FB_PASS=""
 FB_TOKEN=""
 SKIP_AUDIO=false
 SKIP_NOTES=false
+REFRESH=false
+FORCE_AUDIO=false
+CHECK_AUDIO=false
+NO_STEMS_OK=false
+PULL_VIDEO=false
+FORCE_VIDEO=false
 
 ########################################
 # Utility
@@ -76,10 +108,14 @@ require() {
 ########################################
 
 usage() {
-  echo "Usage: $0 <episode-number> [--skip-audio] [--skip-notes]"
+  echo "Usage: $0 <episode-number> [--skip-audio] [--skip-notes] [--refresh] [--force-audio]"
+  echo "       $0 <episode-number> --check-audio [--no-stems-ok]"
+  echo "       $0 <episode-number> --video [--force-video]"
   echo "Example: $0 3"
   echo "         $0 42 --skip-audio"
   echo "         $0 42 --skip-notes"
+  echo "         $0 42 --skip-audio --refresh"
+  echo "         $0 42 --check-audio"
   exit 1
 }
 
@@ -98,13 +134,45 @@ parse_args() {
     case "$1" in
       --skip-audio) SKIP_AUDIO=true ;;
       --skip-notes) SKIP_NOTES=true ;;
+      --refresh) REFRESH=true ;;
+      --force-audio) FORCE_AUDIO=true ;;
+      --check-audio) CHECK_AUDIO=true ;;
+      --no-stems-ok) NO_STEMS_OK=true ;;
+      --video) PULL_VIDEO=true ;;
+      --force-video) FORCE_VIDEO=true ;;
       *) usage ;;
     esac
     shift
   done
 
+  if [[ "$PULL_VIDEO" == true ]]; then
+    if [[ "$CHECK_AUDIO" == true || "$SKIP_AUDIO" == true || "$SKIP_NOTES" == true || "$REFRESH" == true || "$FORCE_AUDIO" == true || "$NO_STEMS_OK" == true ]]; then
+      fatal "--video only downloads the video and cannot be combined with other options (except --force-video)."
+    fi
+    return
+  fi
+  if [[ "$FORCE_VIDEO" == true ]]; then
+    fatal "--force-video only applies to --video."
+  fi
+
+  if [[ "$CHECK_AUDIO" == true ]]; then
+    if [[ "$SKIP_AUDIO" == true || "$SKIP_NOTES" == true || "$REFRESH" == true || "$FORCE_AUDIO" == true ]]; then
+      fatal "--check-audio only checks R2 and cannot be combined with other options (except --no-stems-ok)."
+    fi
+    return
+  fi
+
+  if [[ "$NO_STEMS_OK" == true ]]; then
+    fatal "--no-stems-ok only applies to --check-audio."
+  fi
   if [[ "$SKIP_AUDIO" == true && "$SKIP_NOTES" == true ]]; then
     fatal "--skip-audio and --skip-notes together would do nothing."
+  fi
+  if [[ "$REFRESH" == true && "$SKIP_NOTES" == true ]]; then
+    fatal "--refresh updates the episode file from Outline, so it cannot be used with --skip-notes."
+  fi
+  if [[ "$FORCE_AUDIO" == true && "$SKIP_AUDIO" == true ]]; then
+    fatal "--force-audio has no effect with --skip-audio."
   fi
 }
 
@@ -199,43 +267,46 @@ outline_post() {
 find_episode_doc() {
   header "Searching Outline for episode ${EPISODE_NUM}"
 
-  local payload_tmp response_tmp
-  payload_tmp=$(mktemp /tmp/outline-payload.XXXXXX.json)
-
-  python3 - "$EPISODE_NUM" "$payload_tmp" <<'PYEOF'
+  # Outline's search is ranked text search, so "Episode 20" can fall outside the top
+  # hits (below Episodes 21, 12, 11...). Try a wider search, then a bare-number search,
+  # then scan the document list.
+  local doc_id="" attempt payload_tmp response response_tmp endpoint
+  for attempt in search-wide search-number list; do
+    payload_tmp=$(mktemp /tmp/outline-payload.XXXXXX.json)
+    python3 - "$EPISODE_NUM" "$payload_tmp" "$attempt" <<'PYEOF'
 import json, sys
-num, out = sys.argv[1], sys.argv[2]
+num, out, attempt = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {"search-wide": {"query": f"Episode {num}", "limit": 25},
+           "search-number": {"query": num, "limit": 25},
+           "list": {"limit": 100, "sort": "updatedAt", "direction": "DESC"}}[attempt]
 with open(out, "w") as f:
-    json.dump({"query": f"Episode {num}", "limit": 10}, f)
+    json.dump(payload, f)
 PYEOF
+    endpoint="documents.search"
+    [[ "$attempt" == "list" ]] && endpoint="documents.list"
 
-  local response
-  response=$(outline_post "documents.search" "$payload_tmp")
-  rm -f "$payload_tmp"
-  [[ -n "$response" ]] || fatal "Outline search API call failed."
+    response=$(outline_post "$endpoint" "$payload_tmp") || response=""
+    rm -f "$payload_tmp"
+    if [[ -z "$response" ]]; then
+      # The first call failing means Outline is unreachable; no point trying more.
+      [[ "$attempt" == "search-wide" ]] && fatal "Outline search API call failed."
+      continue
+    fi
 
-  response_tmp=$(mktemp /tmp/outline-search.XXXXXX.json)
-  echo "$response" > "$response_tmp"
-
-  local doc_id
-  doc_id=$(python3 - "$EPISODE_NUM" "$response_tmp" <<'PYEOF'
+    response_tmp=$(mktemp /tmp/outline-search.XXXXXX.json)
+    echo "$response" > "$response_tmp"
+    doc_id=$(python3 - "$EPISODE_NUM" "$response_tmp" <<'PYEOF'
 import json, sys, re
 
 num       = sys.argv[1]
 resp_file = sys.argv[2]
 
-with open(resp_file) as f:
-    raw = f.read()
-
-if not raw.strip():
-    sys.stderr.write("Empty response from Outline search\n")
-    sys.exit(1)
-
 try:
-    data = json.loads(raw)
-except json.JSONDecodeError as e:
-    sys.stderr.write(f"Failed to parse search response: {e}\nRaw: {raw[:500]}\n")
-    sys.exit(1)
+    with open(resp_file) as f:
+        data = json.load(f)
+except (OSError, json.JSONDecodeError) as e:
+    sys.stderr.write(f"Failed to parse Outline response: {e}\n")
+    sys.exit(0)
 
 for item in data.get("data", []):
     doc = item.get("document", item)
@@ -244,12 +315,11 @@ for item in data.get("data", []):
         sys.stderr.write(f"Found: {title}\n")
         print(doc.get("id", ""))
         sys.exit(0)
-
-sys.stderr.write(f"No doc found matching 'Episode {num}'\n")
-sys.exit(1)
 PYEOF
-  )
-  rm -f "$response_tmp"
+    )
+    rm -f "$response_tmp"
+    [[ -n "$doc_id" ]] && break
+  done
 
   if [[ -z "$doc_id" ]]; then
     fatal "No Outline doc found matching 'Episode ${EPISODE_NUM}'."
@@ -448,7 +518,12 @@ build_episode_md() {
   echo "$links_text"    > "$links_tmp"
   echo "$transcript"    > "$transcript_tmp"
 
-  python3 - "$fm_json" "$cover_tmp" "$links_tmp" "$transcript_tmp" "$episodes_dir" "$EPISODE_NUM_PADDED" <<'PYEOF'
+  local mode="new"
+  if [[ "$REFRESH" == true ]]; then
+    mode="refresh"
+  fi
+
+  python3 - "$fm_json" "$cover_tmp" "$links_tmp" "$transcript_tmp" "$episodes_dir" "$EPISODE_NUM_PADDED" "$mode" <<'PYEOF'
 import json, sys, re, os
 
 fm_json        = sys.argv[1]
@@ -457,6 +532,7 @@ links_tmp      = sys.argv[3]
 transcript_tmp = sys.argv[4]
 episodes_dir   = sys.argv[5]
 ep_padded      = sys.argv[6]
+mode           = sys.argv[7] if len(sys.argv) > 7 else "new"
 
 try:
     fm = json.loads(fm_json)
@@ -485,22 +561,86 @@ tags        = fm.get("tags") or []
 hosts       = fm.get("hosts") or []
 guests      = fm.get("guests") or []
 sponsors    = fm.get("sponsors") or []
+chapters_given = bool(fm.get("chapters"))
 chapters    = fm.get("chapters") or [{"time": "00:00:00", "title": "Intro"}]
 
 filename = f"{ep_padded}.md"
 filepath = os.path.join(episodes_dir, filename)
 
-if os.path.exists(filepath):
-    print(f"ERROR: {filepath} already exists — delete it first.", file=sys.stderr)
+exists = os.path.exists(filepath)
+if exists and mode != "refresh":
+    print(f"ERROR: {filepath} already exists. To update it from Outline without "
+          f"losing the transcript or audio fields, run: just refresh-notes {int(ep_padded)}",
+          file=sys.stderr)
     sys.exit(1)
 
+# ---- Refresh support: read what the existing file already holds ----------
+
+PLACEHOLDER = "<!-- transcript will be added by publish.sh -->"
+
+def split_doc(text):
+    """Return (frontmatter_text, body) for a '---' delimited file, else (None, text)."""
+    m = re.match(r"^---\n(.*?)\n---\n(.*)\Z", text, re.DOTALL)
+    if not m:
+        return None, text
+    return m.group(1), m.group(2)
+
+def fm_blocks(fm_text):
+    """Map each top-level frontmatter key to its raw text (key line plus indented lines)."""
+    order, blocks, key = [], {}, None
+    for line in fm_text.split("\n"):
+        m = re.match(r"^([A-Za-z_]\w*):", line)
+        if m:
+            key = m.group(1)
+            order.append(key)
+            blocks[key] = [line]
+        elif key is not None:
+            blocks[key].append(line)
+    return order, {k: "\n".join(v).rstrip("\n") for k, v in blocks.items()}
+
+def scalar(block):
+    """The value on a 'key: value' line, without surrounding quotes."""
+    if block is None:
+        return ""
+    value = block.split("\n", 1)[0].split(":", 1)[1].strip()
+    return value.strip('"').strip("'")
+
+old_blocks, old_body, old_transcript = {}, "", ""
+kept = []
+if exists and mode == "refresh":
+    with open(filepath) as f:
+        old_text = f.read()
+    old_fm_text, old_body = split_doc(old_text)
+    if old_fm_text is not None:
+        _, old_blocks = fm_blocks(old_fm_text)
+    tm = re.search(r"^## [Tt]ranscript[ \t]*\n(.*)\Z", old_body, re.MULTILINE | re.DOTALL)
+    if tm and tm.group(1).strip() and PLACEHOLDER not in tm.group(1):
+        old_transcript = tm.group(1).strip()
+
+    # Fields written by publish.sh: keep them unless Outline sets a real value.
+    if not audio_url and scalar(old_blocks.get("audioUrl")):
+        audio_url = scalar(old_blocks["audioUrl"]); kept.append("audioUrl")
+    if audio_size == "" and scalar(old_blocks.get("audioSize")):
+        audio_size = scalar(old_blocks["audioSize"]); kept.append("audioSize")
+    if duration in ("", "00:00:00") and scalar(old_blocks.get("duration")) not in ("", "00:00:00"):
+        duration = scalar(old_blocks["duration"]); kept.append("duration")
+    # Draft flag: Outline wins only if it says something.
+    if "draft" not in fm and "draft" in old_blocks:
+        draft = scalar(old_blocks["draft"]).lower() == "true"; kept.append("draft")
+
 chapters_yaml = ""
-for ch in chapters:
-    if isinstance(ch, dict):
-        chapters_yaml += f'  - time: "{ch.get("time", "00:00:00")}"\n'
-        chapters_yaml += f'    title: "{ch.get("title", "")}"\n'
-    else:
-        chapters_yaml += f'  - time: "00:00:00"\n    title: "{ch}"\n'
+if exists and mode == "refresh" and not chapters_given and "chapters" in old_blocks:
+    # Outline has no chapters: keep the ones already in the file (e.g. generated by stage).
+    old_lines = old_blocks["chapters"].split("\n")[1:]
+    chapters_yaml = "\n".join(old_lines) + "\n" if old_lines else ""
+    kept.append("chapters")
+else:
+    for ch in chapters:
+        if isinstance(ch, dict):
+            chapters_yaml += f'  - time: "{ch.get("time", "00:00:00")}"\n'
+            chapters_yaml += f'    title: "{ch.get("title", "")}"\n'
+        else:
+            chapters_yaml += f'  - time: "00:00:00"\n    title: "{ch}"\n'
 
 def yaml_list(items):
     return ("\n" + "".join(f"  - {i}\n" for i in items)) if items else " []\n"
@@ -565,18 +705,42 @@ if links_raw.strip():
     if link_lines:
         body_parts.append("## Links\n\n" + "\n".join(link_lines))
 
-if transcript_text.strip():
+notes_parts = list(body_parts)
+
+if old_transcript:
+    # Refresh: the transcript already in the file (from stage, possibly with
+    # speaker names fixed) is newer than anything in Outline.
+    body_parts.append("## Transcript\n\n" + old_transcript)
+    kept.append("transcript")
+elif transcript_text.strip():
     body_parts.append("## Transcript\n\n" + transcript_text.strip())
 else:
-    body_parts.append("## Transcript\n\n<!-- transcript will be added by publish.sh -->")
+    body_parts.append("## Transcript\n\n" + PLACEHOLDER)
 
 body = "\n\n".join(body_parts) + "\n"
 
 os.makedirs(episodes_dir, exist_ok=True)
-with open(filepath, "w") as f:
+tmp_path = filepath + ".tmp"
+with open(tmp_path, "w") as f:
     f.write(frontmatter)
     f.write("\n")
     f.write(body)
+os.replace(tmp_path, filepath)
+
+if exists and mode == "refresh":
+    new_fm_text, _ = split_doc(frontmatter + "\n" + body)
+    _, new_blocks = fm_blocks(new_fm_text) if new_fm_text is not None else ([], {})
+    changed = sorted(k for k in set(old_blocks) | set(new_blocks)
+                     if old_blocks.get(k) != new_blocks.get(k))
+    old_notes = re.split(r"^## [Tt]ranscript[ \t]*$", old_body, maxsplit=1, flags=re.MULTILINE)[0].strip()
+    new_notes = "\n\n".join(notes_parts).strip()
+    if old_notes != new_notes:
+        changed.append("show notes")
+    sys.stderr.write("  Refreshed existing episode file from Outline\n")
+    sys.stderr.write("  Changed: " + (", ".join(changed) if changed else "nothing") + "\n")
+    sys.stderr.write("  Kept from the file: " + (", ".join(kept) if kept else "nothing") + "\n")
+elif mode == "refresh":
+    sys.stderr.write("  No existing episode file; created a new one\n")
 
 print(filepath)
 PYEOF
@@ -760,6 +924,50 @@ for item in items:
 " || true
 }
 
+# Print "<size> <mtime-epoch-seconds>" for one remote file; nothing on failure.
+r2_file_stat() {
+  local path="$1"
+  rclone lsjson "${R2_REMOTE}:${R2_BUCKET}/${path}" 2>/dev/null \
+    | python3 -c "
+import datetime, json, sys
+try:
+    items = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(0)
+items = [i for i in items if not i.get('IsDir')]
+if not items:
+    sys.exit(0)
+item = items[0]
+try:
+    ts = datetime.datetime.fromisoformat(item.get('ModTime', '').replace('Z', '+00:00')).timestamp()
+except ValueError:
+    ts = 0
+print(item.get('Size', -1), int(ts))
+" || true
+}
+
+# Succeeds when the local copy has the same size and (within 2s) the same
+# modification time as the R2 object, so it can be skipped. rclone copyto sets
+# the local mtime to the remote one, so a file this script downloaded earlier
+# matches until the editor uploads a new version.
+local_is_current() {
+  local local_path="$1" remote_path="$2"
+  [[ "$FORCE_AUDIO" == true || "$FORCE_VIDEO" == true ]] && return 1
+  [[ -f "$local_path" ]] || return 1
+
+  local remote_stat remote_size remote_mtime
+  remote_stat=$(r2_file_stat "$remote_path")
+  [[ -n "$remote_stat" ]] || return 1
+  read -r remote_size remote_mtime <<< "$remote_stat"
+
+  python3 - "$local_path" "$remote_size" "$remote_mtime" <<'PYEOF'
+import os, sys
+path, size, mtime = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+st = os.stat(path)
+sys.exit(0 if st.st_size == size and abs(int(st.st_mtime) - mtime) <= 2 else 1)
+PYEOF
+}
+
 # Find the episode subdirectory inside R2_BASE_DIR.
 # Matches 'Episode 10', 'Episode 010', 'Episode 0010', etc.
 r2_find_episode_dir() {
@@ -855,9 +1063,13 @@ PYEOF
 
   mkdir -p "$local_audio_dir"
 
-  log "Downloading: ${audio_file} → $(basename "$audio_local")"
-  rclone copyto "${R2_REMOTE}:${R2_BUCKET}/${full_remote}/${audio_file}" "$audio_local" \
-    || fatal "Failed to download '${audio_file}' from R2."
+  if local_is_current "$audio_local" "${full_remote}/${audio_file}"; then
+    log "Up to date, skipping download: $(basename "$audio_local") (use --force-audio to fetch again)"
+  else
+    log "Downloading: ${audio_file} → $(basename "$audio_local")"
+    rclone copyto --ignore-times "${R2_REMOTE}:${R2_BUCKET}/${full_remote}/${audio_file}" "$audio_local" \
+      || fatal "Failed to download '${audio_file}' from R2."
+  fi
 
   log "Audio saved: ${audio_local}"
 
@@ -894,10 +1106,14 @@ speaker = speaker.replace(' ', '')
 print(sys.argv[2] + '-' + speaker.lower() + '.' + ext.lower())
 " "$track_file" "$ep_prefix")
 
-      log "Downloading track: ${track_file} → ${renamed}"
-      rclone copyto "${R2_REMOTE}:${R2_BUCKET}/${tracks_remote}/${track_file}" \
-        "${local_tracks_dir}/${renamed}" \
-        || { log "WARNING: failed to download '${track_file}' — skipping."; continue; }
+      if local_is_current "${local_tracks_dir}/${renamed}" "${tracks_remote}/${track_file}"; then
+        log "Up to date, skipping track: ${renamed}"
+      else
+        log "Downloading track: ${track_file} → ${renamed}"
+        rclone copyto --ignore-times "${R2_REMOTE}:${R2_BUCKET}/${tracks_remote}/${track_file}" \
+          "${local_tracks_dir}/${renamed}" \
+          || { log "WARNING: failed to download '${track_file}' — skipping."; continue; }
+      fi
       (( downloaded++ )) || true
     done <<< "$track_files"
 
@@ -905,6 +1121,109 @@ print(sys.argv[2] + '-' + speaker.lower() + '.' + ext.lower())
   fi
 
   echo "$audio_local"
+}
+
+########################################
+# R2 Video Fetch (--video)
+########################################
+
+# Download the editor's final video to video/bitflip-eNNNN.<ext>. If the editor
+# uploaded more than one video, the largest is used. Prints the local path.
+fetch_video_r2() {
+  header "Fetching video from R2" >&2
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local local_video_dir="${script_dir}/${VIDEO_DIR}"
+
+  local ep_dir
+  ep_dir=$(r2_find_episode_dir)
+  [[ -n "$ep_dir" ]] || fatal "No episode directory found in '${R2_BASE_DIR}/' matching episode ${EPISODE_NUM}."
+
+  local video_remote="${R2_BASE_DIR}/${ep_dir}/${R2_VIDEO_DIR}"
+  local video_file
+  video_file=$(rclone lsjson "${R2_REMOTE}:${R2_BUCKET}/${video_remote}" 2>/dev/null | python3 -c "
+import json, re, sys
+try:
+    items = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(0)
+vids = [i for i in items if not i.get('IsDir') and re.search(r'\.(mp4|mov|mkv|webm|m4v)$', i.get('Name', ''), re.I)]
+if not vids:
+    sys.exit(0)
+vids.sort(key=lambda i: i.get('Size', 0), reverse=True)
+if len(vids) > 1:
+    sys.stderr.write(f\"WARNING: {len(vids)} videos found, using the largest: '{vids[0]['Name']}'.\\n\")
+print(vids[0]['Name'])
+" || true)
+
+  [[ -n "$video_file" ]] || fatal "No video (.mp4, .mov, .mkv, .webm, .m4v) found in '${video_remote}/' on R2 yet."
+
+  local video_ext
+  video_ext=$(python3 -c "import sys; print(sys.argv[1].rsplit('.', 1)[-1].lower())" "$video_file")
+  local video_local="${local_video_dir}/bitflip-e${EPISODE_NUM_PADDED}.${video_ext}"
+  mkdir -p "$local_video_dir"
+
+  if local_is_current "$video_local" "${video_remote}/${video_file}"; then
+    log "Up to date, skipping download: $(basename "$video_local") (use --force-video to fetch again)" >&2
+  else
+    log "Downloading: ${video_file} → $(basename "$video_local")" >&2
+    rclone copyto --ignore-times -v --stats-one-line --stats=15s \
+      "${R2_REMOTE}:${R2_BUCKET}/${video_remote}/${video_file}" "$video_local" >&2 \
+      || fatal "Failed to download '${video_file}' from R2."
+  fi
+  log "Video saved: ${video_local}" >&2
+  echo "$video_local"
+}
+
+########################################
+# R2 Readiness Check (--check-audio)
+########################################
+
+# Succeeds when the editor's files for this episode are in R2: the full audio
+# and, unless --no-stems-ok, at least one speaker stem. Changes nothing.
+check_audio_r2() {
+  header "Checking R2 for episode ${EPISODE_NUM}"
+
+  local ep_dir
+  ep_dir=$(r2_find_episode_dir)
+  if [[ -z "$ep_dir" ]]; then
+    log "NOT READY: no 'Episode ${EPISODE_NUM}' folder in ${R2_BASE_DIR}/ yet."
+    return 1
+  fi
+  log "Folder: ${R2_BASE_DIR}/${ep_dir}"
+
+  local full_entries track_entries full_count track_count
+  full_entries=$(r2_list_dir "${R2_BASE_DIR}/${ep_dir}/${R2_FULL_DIR}")
+  track_entries=$(r2_list_dir "${R2_BASE_DIR}/${ep_dir}/${R2_SPEAKERS_DIR}")
+  full_count=$(grep -Eic '\.(wav|mp3)$' <<< "$full_entries" || true)
+  track_count=$(grep -Eic '\.(wav|mp3)$' <<< "$track_entries" || true)
+
+  log "Full audio:    ${full_count} file(s) in ${R2_FULL_DIR}/"
+  log "Speaker stems: ${track_count} file(s) in ${R2_SPEAKERS_DIR}/"
+  local video_count
+  video_count=$(grep -Eic '\.(mp4|mov|mkv|webm|m4v)$' <<< "$(r2_list_dir "${R2_BASE_DIR}/${ep_dir}/${R2_VIDEO_DIR}")" || true)
+  log "Video:         ${video_count} file(s) in ${R2_VIDEO_DIR}/ (not required for this check)"
+
+  local ready=true
+  if (( full_count == 0 )); then
+    log "NOT READY: no full audio (.wav or .mp3) yet."
+    ready=false
+  fi
+  if (( track_count == 0 )); then
+    if [[ "$NO_STEMS_OK" == true ]]; then
+      log "No speaker stems, continuing because --no-stems-ok was given."
+    else
+      log "NOT READY: no speaker stems yet (use --no-stems-ok to continue without them)."
+      ready=false
+    fi
+  fi
+
+  if [[ "$ready" == true ]]; then
+    log "READY: the editor's files are in R2."
+    return 0
+  fi
+  return 1
 }
 
 ########################################
@@ -935,6 +1254,35 @@ main() {
   require curl
   require python3
   require git
+
+  if [[ "$CHECK_AUDIO" == true ]]; then
+    [[ "$AUDIO_SOURCE" == "r2" ]] || fatal "--check-audio only works with AUDIO_SOURCE=r2."
+    require rclone
+    rclone listremotes 2>/dev/null | grep -qx "${R2_REMOTE}:" \
+      || fatal "rclone remote '${R2_REMOTE}' not configured — run 'rclone config'."
+    if check_audio_r2; then
+      exit 0
+    fi
+    exit 1
+  fi
+
+  if [[ "$PULL_VIDEO" == true ]]; then
+    [[ "$AUDIO_SOURCE" == "r2" ]] || fatal "--video only works with AUDIO_SOURCE=r2."
+    require rclone
+    rclone listremotes 2>/dev/null | grep -qx "${R2_REMOTE}:" \
+      || fatal "rclone remote '${R2_REMOTE}' not configured — run 'rclone config'."
+    fetch_video_r2 >/dev/null
+    exit 0
+  fi
+
+  # Fail before touching git or Outline when the episode file would be overwritten.
+  if [[ "$SKIP_NOTES" == false && "$REFRESH" == false ]]; then
+    local existing
+    existing="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/${EPISODES_DIR}/${EPISODE_NUM_PADDED}.md"
+    if [[ -f "$existing" ]]; then
+      fatal "${existing} already exists. To update it from Outline without losing the transcript or audio fields, run: just refresh-notes ${EPISODE_NUM}"
+    fi
+  fi
 
   local branch="ep${EPISODE_NUM}"
   header "Switching to branch: ${branch}"
