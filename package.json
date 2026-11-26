@@ -9,7 +9,7 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/sitemap": "^3.7.4",
+    "@astrojs/sitemap": "^3.7.6",
     "astro": "^7.4.13",
     "markdown-it": "^15.0.3",
     "sanitize-html": "^2.18.2",
