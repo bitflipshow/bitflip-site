@@ -267,43 +267,46 @@ outline_post() {
 find_episode_doc() {
   header "Searching Outline for episode ${EPISODE_NUM}"
 
-  local payload_tmp response_tmp
-  payload_tmp=$(mktemp /tmp/outline-payload.XXXXXX.json)
-
-  python3 - "$EPISODE_NUM" "$payload_tmp" <<'PYEOF'
+  # Outline's search is ranked text search, so "Episode 20" can fall outside the top
+  # hits (below Episodes 21, 12, 11...). Try a wider search, then a bare-number search,
+  # then scan the document list.
+  local doc_id="" attempt payload_tmp response response_tmp endpoint
+  for attempt in search-wide search-number list; do
+    payload_tmp=$(mktemp /tmp/outline-payload.XXXXXX.json)
+    python3 - "$EPISODE_NUM" "$payload_tmp" "$attempt" <<'PYEOF'
 import json, sys
-num, out = sys.argv[1], sys.argv[2]
+num, out, attempt = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {"search-wide": {"query": f"Episode {num}", "limit": 25},
+           "search-number": {"query": num, "limit": 25},
+           "list": {"limit": 100, "sort": "updatedAt", "direction": "DESC"}}[attempt]
 with open(out, "w") as f:
-    json.dump({"query": f"Episode {num}", "limit": 10}, f)
+    json.dump(payload, f)
 PYEOF
+    endpoint="documents.search"
+    [[ "$attempt" == "list" ]] && endpoint="documents.list"
 
-  local response
-  response=$(outline_post "documents.search" "$payload_tmp")
-  rm -f "$payload_tmp"
-  [[ -n "$response" ]] || fatal "Outline search API call failed."
+    response=$(outline_post "$endpoint" "$payload_tmp") || response=""
+    rm -f "$payload_tmp"
+    if [[ -z "$response" ]]; then
+      # The first call failing means Outline is unreachable; no point trying more.
+      [[ "$attempt" == "search-wide" ]] && fatal "Outline search API call failed."
+      continue
+    fi
 
-  response_tmp=$(mktemp /tmp/outline-search.XXXXXX.json)
-  echo "$response" > "$response_tmp"
-
-  local doc_id
-  doc_id=$(python3 - "$EPISODE_NUM" "$response_tmp" <<'PYEOF'
+    response_tmp=$(mktemp /tmp/outline-search.XXXXXX.json)
+    echo "$response" > "$response_tmp"
+    doc_id=$(python3 - "$EPISODE_NUM" "$response_tmp" <<'PYEOF'
 import json, sys, re
 
 num       = sys.argv[1]
 resp_file = sys.argv[2]
 
-with open(resp_file) as f:
-    raw = f.read()
-
-if not raw.strip():
-    sys.stderr.write("Empty response from Outline search\n")
-    sys.exit(1)
-
 try:
-    data = json.loads(raw)
-except json.JSONDecodeError as e:
-    sys.stderr.write(f"Failed to parse search response: {e}\nRaw: {raw[:500]}\n")
-    sys.exit(1)
+    with open(resp_file) as f:
+        data = json.load(f)
+except (OSError, json.JSONDecodeError) as e:
+    sys.stderr.write(f"Failed to parse Outline response: {e}\n")
+    sys.exit(0)
 
 for item in data.get("data", []):
     doc = item.get("document", item)
@@ -312,12 +315,11 @@ for item in data.get("data", []):
         sys.stderr.write(f"Found: {title}\n")
         print(doc.get("id", ""))
         sys.exit(0)
-
-sys.stderr.write(f"No doc found matching 'Episode {num}'\n")
-sys.exit(1)
 PYEOF
-  )
-  rm -f "$response_tmp"
+    )
+    rm -f "$response_tmp"
+    [[ -n "$doc_id" ]] && break
+  done
 
   if [[ -z "$doc_id" ]]; then
     fatal "No Outline doc found matching 'Episode ${EPISODE_NUM}'."
