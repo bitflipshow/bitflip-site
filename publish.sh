@@ -1329,8 +1329,13 @@ load_github_token() {
     GITHUB_TOKEN="${GITHUB_TOKEN:-}"
   fi
 
+  # No token file or env var: borrow the login from the GitHub CLI (`gh auth login`).
+  if [[ -z "$GITHUB_TOKEN" ]] && command -v gh >/dev/null 2>&1; then
+    GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
+  fi
+
   if [[ -z "$GITHUB_TOKEN" ]]; then
-    fatal "No GitHub token found at $token_file. Create a fine-grained token with Contents and Pull Requests permissions (read/write) at https://github.com/settings/tokens"
+    fatal "No GitHub token found at $token_file and 'gh' is not logged in (try: gh auth login). Or create a fine-grained token with Contents and Pull Requests permissions (read/write) at https://github.com/settings/tokens"
   fi
 }
 
